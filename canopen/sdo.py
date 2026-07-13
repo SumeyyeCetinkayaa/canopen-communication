@@ -63,16 +63,23 @@ class SDOResponse:
         self.command = self.data[0]
         self.index = self.data[1] | (self.data[2] << 8)
         self.subindex = self.data[3]
-        self.value = (
-            self.data[4]
-            | (self.data[5] << 8)
-            | (self.data[6] << 16)
-            | (self.data[7] << 24)
+
+        self.value = int.from_bytes(
+            self.data[4:8],
+            byteorder="little",
+            signed=False
         )
 
     @staticmethod
     def is_sdo_response(message, node_id):
         return message.arbitration_id == (0x580 + node_id)
+
+    def as_signed_32(self):
+        return int.from_bytes(
+            self.data[4:8],
+            byteorder="little",
+            signed=True
+        )
 
     def __str__(self):
         return (

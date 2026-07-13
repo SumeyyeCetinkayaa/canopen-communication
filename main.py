@@ -25,42 +25,52 @@ def print_response(title, response):
 
 def main():
     can_bus = CanBus()
-    node_id = 1
+
+    # Heartbeat COB-ID:
+    # 0x75B = 0x700 + 0x5B
+    node_id = 0x5B
+
+    print(f"Node ID: 0x{node_id:02X}")
+    print(f"SDO Request COB-ID: 0x{0x600 + node_id:03X}")
+    print(f"SDO Response COB-ID: 0x{0x580 + node_id:03X}")
 
     try:
         can_bus.connect()
 
-        client = CANopenClient(can_bus, node_id)
+        client = CANopenClient(
+            can_bus=can_bus,
+            node_id=node_id
+        )
 
         device_type = client.read_object(
             index=ObjectDictionary.DEVICE_TYPE,
-            subindex=0
+            subindex=0,
+            timeout=3.0
         )
-        print_response("Device Type:", device_type)
 
-        vendor_id = client.read_object(
-            index=ObjectDictionary.IDENTITY_OBJECT,
-            subindex=ObjectDictionary.IDENTITY_VENDOR_ID
+        print_response(
+            title="Device Type:",
+            response=device_type
         )
-        print_response("Vendor ID:", vendor_id)
 
-        product_code = client.read_object(
-            index=ObjectDictionary.IDENTITY_OBJECT,
-            subindex=ObjectDictionary.IDENTITY_PRODUCT_CODE
+        position = client.read_object(
+            index=ObjectDictionary.POSITION_VALUE,
+            subindex=0,
+            timeout=3.0
         )
-        print_response("Product Code:", product_code)
 
-        serial_number = client.read_object(
-            index=ObjectDictionary.IDENTITY_OBJECT,
-            subindex=ObjectDictionary.IDENTITY_SERIAL_NUMBER
-        )
-        print_response("Serial Number:", serial_number)
+        print("\nPosition Value:")
+
+        if position is None:
+            print("Değer okunamadı.")
+        else:
+            print(f"{position.as_signed_32()} count")
 
     except KeyboardInterrupt:
-        print("\nProgram durduruldu.")
+        print("\nProgram kullanıcı tarafından durduruldu.")
 
-    except Exception as e:
-        print("Hata:", e)
+    except Exception as error:
+        print(f"\nHata: {error}")
 
     finally:
         can_bus.shutdown()

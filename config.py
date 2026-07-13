@@ -8,7 +8,7 @@ Bu dosyada;
 gibi uygulama boyunca ortak kullanılacak ayarlar tutulur.
 """
 
-USE_REAL_CAN = False
+USE_REAL_CAN = True
 
 CHANNEL = "PCAN_USBBUS1"
 BITRATE = 250000
