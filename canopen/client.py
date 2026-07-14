@@ -277,7 +277,7 @@ class CANopenClient:
             print(message)
 
             if message.arbitration_id != expected_heartbeat_id:
-                print("Mesaj beklenen heartbeat ID'sine ait değil.")
+                print("Heartbeat değil, başka CAN mesajı alındı.")
                 continue
 
             if len(message.data) < 1:

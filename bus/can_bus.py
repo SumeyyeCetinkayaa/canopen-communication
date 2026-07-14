@@ -11,15 +11,39 @@ from bus.fake_can import FakeCan
 from bus.real_can import RealCan
 
 
-class CanBus: 
+class CanBus:
     def __init__(self):
         if USE_REAL_CAN:
             self.adapter = RealCan()
         else:
             self.adapter = FakeCan()
 
-    def connect(self):
-        self.adapter.connect()
+    def connect(self, bitrate=None):
+        """
+        CAN bağlantısını açar.
+
+        Gerçek CAN kullanıldığında bitrate verilebilir.
+        FakeCan kullanıldığında bitrate dikkate alınmaz.
+        """
+
+        if USE_REAL_CAN:
+            self.adapter.connect(bitrate=bitrate)
+        else:
+            self.adapter.connect()
+
+    def reconnect(self, bitrate):
+        """
+        CAN bağlantısını verilen yeni bitrate ile yeniden açar.
+        """
+
+        if not USE_REAL_CAN:
+            print(
+                "FakeCan kullanılırken bitrate değişikliği "
+                "uygulanmaz."
+            )
+            return
+
+        self.adapter.reconnect(bitrate=bitrate)
 
     def send_message(self, message):
         self.adapter.send(message)
