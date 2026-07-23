@@ -89,7 +89,7 @@ SDO Read ve SDO Write mesajlarını oluşturur ve gelen cevapları işler.
 
 `canopen/nmt.py`
 
-NMT komutlarını oluşturur.
+NMT komutlarını oluşturur.é
 
 `canopen/object_dictionary.py`
 
@@ -218,7 +218,7 @@ Ardından sanal ortam tekrar etkinleştirilir:
 
 ### 4. Gerekli paketi yükleme
 
-```powershell
+```powershel
 pip install python-can
 ```
 

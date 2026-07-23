@@ -14,6 +14,10 @@ from canopen.nmt import NMTCommand
 from canopen.sdo import SDORequest, SDOResponse
 
 
+# True yapılırsa ayrıntılı CAN ve SDO mesajları gösterilir.
+DEBUG = False
+
+
 class CANopenClient:
     # CANopen NMT durum byte'ları
     NMT_BOOT_UP = 0x00
@@ -25,6 +29,14 @@ class CANopenClient:
         self.can_bus = can_bus
         self.node_id = node_id
 
+    def _debug(self, message=""):
+        """
+        Yalnızca DEBUG açıkken ayrıntılı mesaj gösterir.
+        """
+
+        if DEBUG:
+            print(message)
+
     def _wait_for_sdo_response(self, request, timeout):
         """
         Gönderilen SDO isteğine ait cevabı bekler.
@@ -35,7 +47,7 @@ class CANopenClient:
 
         expected_response_id = 0x580 + self.node_id
 
-        print(
+        self._debug(
             f"Beklenen SDO cevap ID'si: "
             f"0x{expected_response_id:03X}"
         )
@@ -48,31 +60,37 @@ class CANopenClient:
             if response_msg is None:
                 continue
 
-            print("CAN mesajı alındı:")
-            print(response_msg)
+            self._debug("CAN mesajı alındı:")
+            self._debug(response_msg)
 
+            # Hatta başka cihazlardan gelen mesajlar olabilir.
+            # Normal modda bu mesajlar sessizce atlanır.
             if not SDOResponse.is_sdo_response(
                 response_msg,
                 node_id=self.node_id
             ):
-                print("Mesaj bu node'a ait bir SDO cevabı değil.")
+                self._debug(
+                    "Mesaj bu node'a ait bir SDO cevabı değil."
+                )
                 continue
 
             response = SDOResponse(response_msg)
 
             if not response.matches(request):
-                print("Yanlış isteğe ait SDO cevabı geldi.")
+                self._debug(
+                    "Yanlış isteğe ait SDO cevabı geldi."
+                )
                 continue
 
             if response.is_abort():
-                print("Cihaz SDO Abort gönderdi.")
-                print(response)
+                print("✗ Cihaz SDO Abort cevabı gönderdi.")
+                self._debug(response)
                 return None
 
             return response
 
         print(
-            f"{timeout} saniye içinde SDO cevabı alınamadı. "
+            f"✗ {timeout} saniye içinde SDO cevabı alınamadı. "
             f"Beklenen CAN ID: 0x{expected_response_id:03X}"
         )
 
@@ -92,9 +110,9 @@ class CANopenClient:
             node_id=self.node_id
         )
 
-        print("\nSDO Read gönderiliyor:")
-        print(request)
-        print(message)
+        self._debug("\nSDO Read gönderiliyor:")
+        self._debug(request)
+        self._debug(message)
 
         self.can_bus.send_message(message)
 
@@ -106,8 +124,8 @@ class CANopenClient:
         if response is None:
             return None
 
-        print("Geçerli SDO Read cevabı alındı.")
-        print(response)
+        self._debug("Geçerli SDO Read cevabı alındı.")
+        self._debug(response)
 
         return response
 
@@ -136,9 +154,9 @@ class CANopenClient:
             node_id=self.node_id
         )
 
-        print("\nSDO Write gönderiliyor:")
-        print(request)
-        print(message)
+        self._debug("\nSDO Write gönderiliyor:")
+        self._debug(request)
+        self._debug(message)
 
         self.can_bus.send_message(message)
 
@@ -152,14 +170,14 @@ class CANopenClient:
 
         if not response.is_write_success():
             print(
-                "Beklenen SDO Write onayı alınamadı. "
+                "✗ Beklenen SDO Write onayı alınamadı. "
                 f"Komut byte'ı: 0x{response.command:02X}"
             )
-            print(response)
+            self._debug(response)
             return False
 
-        print("SDO Write işlemi başarılı.")
-        print(response)
+        self._debug("SDO Write işlemi başarılı.")
+        self._debug(response)
 
         return True
 
@@ -172,16 +190,20 @@ class CANopenClient:
 
         message = command.to_can_message()
 
-        print("\nNMT komutu gönderiliyor:")
-        print(command)
-        print(message)
+        self._debug("\nNMT komutu gönderiliyor:")
+        self._debug(command)
+        self._debug(message)
 
         self.can_bus.send_message(message)
 
-        print("NMT komutu CAN hattına gönderildi.")
+        self._debug("NMT komutu CAN hattına gönderildi.")
 
     def start_node(self, node_id=None):
-        target_node_id = self.node_id if node_id is None else node_id
+        target_node_id = (
+            self.node_id
+            if node_id is None
+            else node_id
+        )
 
         command = NMTCommand.start_node(
             node_id=target_node_id
@@ -190,7 +212,11 @@ class CANopenClient:
         self._send_nmt_command(command)
 
     def stop_node(self, node_id=None):
-        target_node_id = self.node_id if node_id is None else node_id
+        target_node_id = (
+            self.node_id
+            if node_id is None
+            else node_id
+        )
 
         command = NMTCommand.stop_node(
             node_id=target_node_id
@@ -199,7 +225,11 @@ class CANopenClient:
         self._send_nmt_command(command)
 
     def enter_pre_operational(self, node_id=None):
-        target_node_id = self.node_id if node_id is None else node_id
+        target_node_id = (
+            self.node_id
+            if node_id is None
+            else node_id
+        )
 
         command = NMTCommand.enter_pre_operational(
             node_id=target_node_id
@@ -208,7 +238,11 @@ class CANopenClient:
         self._send_nmt_command(command)
 
     def reset_node(self, node_id=None):
-        target_node_id = self.node_id if node_id is None else node_id
+        target_node_id = (
+            self.node_id
+            if node_id is None
+            else node_id
+        )
 
         command = NMTCommand.reset_node(
             node_id=target_node_id
@@ -217,7 +251,11 @@ class CANopenClient:
         self._send_nmt_command(command)
 
     def reset_communication(self, node_id=None):
-        target_node_id = self.node_id if node_id is None else node_id
+        target_node_id = (
+            self.node_id
+            if node_id is None
+            else node_id
+        )
 
         command = NMTCommand.reset_communication(
             node_id=target_node_id
@@ -242,12 +280,14 @@ class CANopenClient:
             0x04 -> Stopped
             0x05 -> Operational
             0x7F -> Pre-operational
-
-        accepted_states verilmezse bilinen tüm NMT durumları
-        kabul edilir.
         """
 
-        target_node_id = self.node_id if node_id is None else node_id
+        target_node_id = (
+            self.node_id
+            if node_id is None
+            else node_id
+        )
+
         expected_heartbeat_id = 0x700 + target_node_id
 
         if accepted_states is None:
@@ -260,7 +300,7 @@ class CANopenClient:
         else:
             accepted_states = set(accepted_states)
 
-        print(
+        self._debug(
             f"\nHeartbeat/boot-up mesajı bekleniyor. "
             f"Beklenen CAN ID: 0x{expected_heartbeat_id:03X}"
         )
@@ -273,37 +313,41 @@ class CANopenClient:
             if message is None:
                 continue
 
-            print("CAN mesajı alındı:")
-            print(message)
+            self._debug("CAN mesajı alındı:")
+            self._debug(message)
 
             if message.arbitration_id != expected_heartbeat_id:
-                print("Heartbeat değil, başka CAN mesajı alındı.")
+                self._debug(
+                    "Heartbeat değil, başka CAN mesajı alındı."
+                )
                 continue
 
             if len(message.data) < 1:
-                print("Heartbeat mesajının veri alanı boş.")
+                self._debug(
+                    "Heartbeat mesajının veri alanı boş."
+                )
                 continue
 
             state = message.data[0]
 
             if state not in accepted_states:
-                print(
-                    f"Heartbeat durumu beklenen durumlar arasında değil: "
-                    f"0x{state:02X}"
+                self._debug(
+                    "Heartbeat durumu beklenen durumlar "
+                    f"arasında değil: 0x{state:02X}"
                 )
                 continue
 
             state_name = self._get_nmt_state_name(state)
 
-            print(
-                f"Geçerli heartbeat/boot-up mesajı alındı. "
+            self._debug(
+                "Geçerli heartbeat/boot-up mesajı alındı. "
                 f"Durum: {state_name} (0x{state:02X})"
             )
 
             return state
 
         print(
-            f"{timeout} saniye içinde heartbeat/boot-up "
+            f"✗ {timeout} saniye içinde heartbeat/boot-up "
             f"mesajı alınamadı. "
             f"Beklenen CAN ID: 0x{expected_heartbeat_id:03X}"
         )
@@ -351,7 +395,7 @@ class CANopenClient:
         old_node_id = self.node_id
         self.node_id = new_node_id
 
-        print(
-            f"\nCANopenClient Node ID güncellendi: "
+        self._debug(
+            f"CANopenClient Node ID güncellendi: "
             f"0x{old_node_id:02X} -> 0x{new_node_id:02X}"
         )

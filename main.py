@@ -1,11 +1,10 @@
 """
 Uygulamanın başlangıç noktasıdır.
 
-Kullanıcıdan mevcut ve yeni Node ID ile baud rate değerlerini alır.
+Kullanıcıdan yeni Node ID ve baud rate değerlerini alır.
 Encoder ayarlarını CANopen üzerinden uygular, kalıcı belleğe kaydeder,
 iletişimi yeniden başlatır ve yeni bağlantı bilgileriyle doğrular.
 """
-
 
 import time
 
@@ -16,6 +15,7 @@ from canopen.encoder_configurator import (
     EncoderSettings,
 )
 from canopen.object_dictionary import ObjectDictionary
+from encoder_state import load_encoder_state, save_encoder_state
 
 
 BITRATE_VALUES = {
@@ -31,11 +31,23 @@ BITRATE_VALUES = {
 }
 
 
+def print_success(message):
+    print(f"✓ {message}")
+
+
+def print_error(message):
+    print(f"✗ {message}")
+
+
+def print_warning(message):
+    print(f"⚠ {message}")
+
+
 def parse_node_id(value):
     """
     Node ID değerini decimal veya hexadecimal olarak kabul eder.
 
-    Örnek geçerli girişler:
+    Örnek:
         90
         0x5A
         5A
@@ -49,10 +61,16 @@ def parse_node_id(value):
     try:
         if cleaned_value.lower().startswith("0x"):
             node_id = int(cleaned_value, 16)
-        elif any(character in "abcdefABCDEF" for character in cleaned_value):
+
+        elif any(
+            character in "abcdefABCDEF"
+            for character in cleaned_value
+        ):
             node_id = int(cleaned_value, 16)
+
         else:
             node_id = int(cleaned_value, 10)
+
     except ValueError as error:
         raise ValueError(
             "Node ID decimal veya hexadecimal bir sayı olmalıdır."
@@ -78,15 +96,18 @@ def read_node_id(prompt, default_value=None):
             else ""
         )
 
-        user_input = input(f"{prompt}{default_text}: ").strip()
+        user_input = input(
+            f"{prompt}{default_text}: "
+        ).strip()
 
         if not user_input and default_value is not None:
             return default_value
 
         try:
             return parse_node_id(user_input)
+
         except ValueError as error:
-            print(f"Hatalı giriş: {error}")
+            print_error(str(error))
 
 
 def read_baud_rate(prompt, default_value=None):
@@ -106,20 +127,25 @@ def read_baud_rate(prompt, default_value=None):
             else ""
         )
 
-        user_input = input(f"{prompt}{default_text}: ").strip()
+        user_input = input(
+            f"{prompt}{default_text}: "
+        ).strip()
 
         if not user_input and default_value is not None:
             return default_value
 
         try:
             baud_rate = int(user_input)
+
         except ValueError:
-            print("Baud rate sayısal bir değer olmalıdır.")
+            print_error(
+                "Baud rate sayısal bir değer olmalıdır."
+            )
             continue
 
         if baud_rate not in BITRATE_VALUES:
-            print(
-                f"Desteklenmeyen baud rate. "
+            print_error(
+                "Desteklenmeyen baud rate. "
                 f"Geçerli değerler: {supported_rates} kbit/s"
             )
             continue
@@ -143,67 +169,71 @@ def read_confirmation():
         if answer in ("h", "hayır", "hayir", "n", "no"):
             return False
 
-        print("Lütfen E veya H girin.")
-
-
-def print_cob_ids(title, node_id):
-    """
-    Verilen Node ID için CANopen COB-ID değerlerini gösterir.
-    """
-
-    print(f"\n{title}")
-    print(f"Node ID             : 0x{node_id:02X}")
-    print(f"SDO Request COB-ID  : 0x{0x600 + node_id:03X}")
-    print(f"SDO Response COB-ID : 0x{0x580 + node_id:03X}")
-    print(f"Heartbeat COB-ID    : 0x{0x700 + node_id:03X}")
+        print_warning("Lütfen E veya H girin.")
 
 
 def print_configuration(settings, current_baud_rate):
     """
-    Mevcut ve uygulanacak encoder ayarlarını gösterir.
+    Mevcut ve yeni encoder ayarlarını gösterir.
     """
 
-    print("\nUygulanacak encoder ayarları:")
-    print(f"Mevcut Node ID          : 0x{settings.current_node_id:02X}")
-    print(f"Yeni Node ID            : 0x{settings.new_node_id:02X}")
-    print(f"Mevcut Baud Rate        : {current_baud_rate} kbit/s")
-    print(f"Yeni Baud Rate          : {settings.baud_rate} kbit/s")
-    print(f"Producer Heartbeat Time : {settings.heartbeat_time_ms} ms")
-    print(f"Transmission Type       : {settings.transmission_type}")
-    print(f"Event Time              : {settings.event_time_ms} ms")
+    print("\nYapılandırma özeti")
+    print("------------------")
+    print(
+        f"Node ID    : "
+        f"0x{settings.current_node_id:02X} "
+        f"→ 0x{settings.new_node_id:02X}"
+    )
+    print(
+        f"Baud Rate  : "
+        f"{current_baud_rate} "
+        f"→ {settings.baud_rate} kbit/s"
+    )
+    print(
+        f"Heartbeat  : "
+        f"{settings.heartbeat_time_ms} ms"
+    )
+    print(
+        f"Transmission Type : "
+        f"{settings.transmission_type}"
+    )
+    print(
+        f"Event Time : "
+        f"{settings.event_time_ms} ms"
+    )
 
 
 def get_user_settings():
     """
     Encoder yapılandırma değerlerini kullanıcıdan alır.
-
-    Heartbeat, transmission type ve event time görev gereği
-    sabit değerlerdir. Node ID ve baud rate kullanıcıdan alınır.
     """
 
-    print("\nEncoder yapılandırma ekranı")
-    print("----------------------------")
-    print("Node ID decimal veya hexadecimal girilebilir.")
-    print("Örnek: 90, 0x5A veya 5A")
-    print(
-        "Bir alanı varsayılan değerde bırakmak için "
-        "doğrudan Enter'a basabilirsiniz."
+    current_node_id, current_baud_rate = (
+        load_encoder_state()
     )
 
-    # Encoder'ın şu anki doğrulanmış değerleri.
-    current_node_id = read_node_id(
-        prompt="Mevcut Node ID",
-        default_value=0x5A,
+    print("\nCANopen Encoder Yapılandırması")
+    print("------------------------------")
+    print(
+        f"Mevcut Node ID   : "
+        f"0x{current_node_id:02X}"
+    )
+    print(
+        f"Mevcut Baud Rate : "
+        f"{current_baud_rate} kbit/s"
+    )
+    print(
+        "Node ID için 91, 0x5B veya 5B "
+        "biçimi kullanılabilir."
+    )
+    print(
+        "Varsayılan değeri kullanmak için "
+        "Enter'a basın.\n"
     )
 
     new_node_id = read_node_id(
         prompt="Yeni Node ID",
         default_value=current_node_id,
-    )
-
-    current_baud_rate = read_baud_rate(
-        prompt="Mevcut baud rate (kbit/s)",
-        default_value=500,
     )
 
     new_baud_rate = read_baud_rate(
@@ -225,14 +255,9 @@ def get_user_settings():
 
 def verify_new_connection(client, settings):
     """
-    Reset sonrasında encoder'ın yeni Node ID ve baud rate ile
-    çalıştığını SDO okumalarıyla doğrular.
+    Reset sonrasında encoder'ın yeni bağlantı bilgileriyle
+    çalıştığını doğrular.
     """
-
-    print(
-        "\nYeni bağlantı bilgileriyle SDO haberleşmesi "
-        "kontrol ediliyor..."
-    )
 
     device_type = client.read_object(
         index=ObjectDictionary.DEVICE_TYPE,
@@ -241,14 +266,11 @@ def verify_new_connection(client, settings):
     )
 
     if device_type is None:
-        print(
-            "\nEncoder heartbeat gönderdi ancak "
+        print_error(
+            "Encoder heartbeat gönderdi ancak "
             "SDO isteğine cevap vermedi."
         )
         return False
-
-    print("\nSDO haberleşmesi doğrulandı.")
-    print(f"Device Type: 0x{device_type.value:08X}")
 
     node_id_response = client.read_object(
         index=ObjectDictionary.NODE_ID,
@@ -257,16 +279,16 @@ def verify_new_connection(client, settings):
     )
 
     if node_id_response is None:
-        print("\nNode ID kaydı tekrar okunamadı.")
+        print_error(
+            "Node ID kaydı tekrar okunamadı."
+        )
         return False
 
     if node_id_response.value != settings.new_node_id:
-        print("\nNode ID doğrulaması başarısız.")
-        print(
-            f"Beklenen: 0x{settings.new_node_id:02X}"
-        )
-        print(
-            f"Okunan  : 0x{node_id_response.value:02X}"
+        print_error(
+            "Node ID doğrulaması başarısız. "
+            f"Beklenen: 0x{settings.new_node_id:02X}, "
+            f"okunan: 0x{node_id_response.value:02X}"
         )
         return False
 
@@ -277,7 +299,9 @@ def verify_new_connection(client, settings):
     )
 
     if baud_rate_response is None:
-        print("\nBaud rate kaydı tekrar okunamadı.")
+        print_error(
+            "Baud rate kaydı tekrar okunamadı."
+        )
         return False
 
     expected_baud_rate_code = (
@@ -287,21 +311,12 @@ def verify_new_connection(client, settings):
     )
 
     if baud_rate_response.value != expected_baud_rate_code:
-        print("\nBaud rate doğrulaması başarısız.")
-        print(f"Beklenen kod: {expected_baud_rate_code}")
-        print(f"Okunan kod  : {baud_rate_response.value}")
+        print_error(
+            "Baud rate doğrulaması başarısız. "
+            f"Beklenen kod: {expected_baud_rate_code}, "
+            f"okunan kod: {baud_rate_response.value}"
+        )
         return False
-
-    print(
-        f"\nNode ID kalıcı olarak doğrulandı: "
-        f"0x{settings.new_node_id:02X}"
-    )
-
-    print(
-        f"Baud rate kalıcı olarak doğrulandı: "
-        f"{settings.baud_rate} kbit/s "
-        f"(kod: {baud_rate_response.value})"
-    )
 
     return True
 
@@ -310,16 +325,8 @@ def main():
     can_bus = CanBus()
 
     try:
-        settings, current_baud_rate = get_user_settings()
-
-        print_cob_ids(
-            title="Mevcut CANopen haberleşme bilgileri:",
-            node_id=settings.current_node_id,
-        )
-
-        print_cob_ids(
-            title="Reset sonrasında beklenen haberleşme bilgileri:",
-            node_id=settings.new_node_id,
+        settings, current_baud_rate = (
+            get_user_settings()
         )
 
         print_configuration(
@@ -328,12 +335,17 @@ def main():
         )
 
         if not read_confirmation():
-            print("\nİşlem kullanıcı tarafından iptal edildi.")
+            print_warning(
+                "İşlem kullanıcı tarafından iptal edildi."
+            )
             return
 
-        # Encoder'a mevcut baud rate üzerinden bağlan.
+        print("\nYapılandırma başlatılıyor...\n")
+
         can_bus.connect(
-            bitrate=BITRATE_VALUES[current_baud_rate]
+            bitrate=BITRATE_VALUES[
+                current_baud_rate
+            ]
         )
 
         client = CANopenClient(
@@ -345,79 +357,75 @@ def main():
             client=client
         )
 
-        # Tüm ayarları yaz ve reset öncesinde geri okuyarak doğrula.
         configured = configurator.configure(
             settings=settings
         )
 
         if not configured:
-            print("\nEncoder yapılandırılamadı.")
+            print_error(
+                "Encoder yapılandırılamadı."
+            )
             return
 
-        # Ayarları EEPROM'a kaydet.
         saved = configurator.save()
 
         if not saved:
-            print("\nAyarlar kalıcı hafızaya kaydedilemedi.")
+            print_error(
+                "Ayarlar kalıcı hafızaya "
+                "kaydedilemedi."
+            )
             return
 
-        print("\nEncoder ayarları yazıldı ve kaydedildi.")
+        print_success(
+            "Ayarlar EEPROM'a kaydedildi."
+        )
 
         time.sleep(1.0)
-
-        # Reset komutu, encoder henüz eski Node ID ve baud rate
-        # ile çalışırken gönderilir.
-        print(
-            "\nEncoder iletişim parametreleri "
-            "yeniden başlatılıyor..."
-        )
 
         client.reset_communication(
             node_id=settings.current_node_id
         )
 
-        print(
-            "\nNMT Reset Communication komutu "
-            f"0x{settings.current_node_id:02X} Node ID'sine "
-            "gönderildi."
+        print_success(
+            "Reset Communication gönderildi."
         )
 
-        # PCAN bağlantısını yeni baud rate ile yeniden aç.
         can_bus.reconnect(
-            bitrate=BITRATE_VALUES[settings.baud_rate]
+            bitrate=BITRATE_VALUES[
+                settings.baud_rate
+            ]
         )
 
-        print(
-            f"\nPCAN bağlantısı {settings.baud_rate} kbit/s "
-            "ile yeniden açıldı."
+        print_success(
+            f"CAN bağlantısı "
+            f"{settings.baud_rate} kbit/s "
+            f"ile yeniden açıldı."
         )
 
-        # Encoder'ın yeni Node ID ve baud rate ile görünmesini bekle.
         state = client.wait_for_heartbeat(
             node_id=settings.new_node_id,
             timeout=8.0,
         )
 
         if state is None:
-            print(
-                "\nEncoder yeni bağlantı bilgileriyle bulunamadı."
+            print_error(
+                "Encoder yeni bağlantı "
+                "bilgileriyle bulunamadı."
             )
             print(
-                f"Beklenen Node ID   : "
+                f"  Beklenen Node ID   : "
                 f"0x{settings.new_node_id:02X}"
             )
             print(
-                f"Beklenen baud rate : "
+                f"  Beklenen baud rate : "
                 f"{settings.baud_rate} kbit/s"
             )
             return
 
-        print(
-            "\nEncoder yeni bağlantı bilgileriyle "
-            "CAN hattında görüldü."
+        print_success(
+            "Heartbeat doğrulandı."
         )
 
-        # Bundan sonraki SDO isteklerinde yeni Node ID kullanılır.
         client.change_node_id(
             settings.new_node_id
         )
@@ -428,38 +436,46 @@ def main():
         ):
             return
 
-        print("\nYapılandırma başarıyla tamamlandı.")
+        print_success(
+            "SDO haberleşmesi doğrulandı."
+        )
 
-        print("\nSon encoder ayarları:")
+        save_encoder_state(
+            settings.new_node_id,
+            settings.baud_rate
+        )
+
+        print_success(
+            "Son encoder durumu kaydedildi."
+        )
+
+        print("\n--------------------------------")
+        print("Encoder başarıyla yapılandırıldı")
+        print("--------------------------------")
+
         print(
-            f"Node ID                 : "
+            f"Node ID   : "
             f"0x{settings.new_node_id:02X}"
         )
         print(
-            f"Baud Rate               : "
+            f"Baud Rate : "
             f"{settings.baud_rate} kbit/s"
-        )
-        print(
-            f"Producer Heartbeat Time : "
-            f"{settings.heartbeat_time_ms} ms"
-        )
-        print(
-            f"Transmission Type       : "
-            f"{settings.transmission_type}"
-        )
-        print(
-            f"Event Time              : "
-            f"{settings.event_time_ms} ms"
         )
 
     except KeyboardInterrupt:
-        print("\nProgram kullanıcı tarafından durduruldu.")
+        print_warning(
+            "Program kullanıcı tarafından durduruldu."
+        )
 
     except ValueError as error:
-        print(f"\nGeçersiz değer: {error}")
+        print_error(
+            f"Geçersiz değer: {error}"
+        )
 
     except Exception as error:
-        print(f"\nHata: {error}")
+        print_error(
+            f"Beklenmeyen hata: {error}"
+        )
 
     finally:
         can_bus.shutdown()

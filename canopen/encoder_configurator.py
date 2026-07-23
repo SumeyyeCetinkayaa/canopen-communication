@@ -23,8 +23,6 @@ class EncoderConfigurator:
     geri okuyarak doğrular ve kalıcı hafızaya kaydeder.
     """
 
-    # Kullanıcının girdiği kbit/s değerini encoder'ın
-    # 0x2100:00 nesnesinde beklediği seçim koduna dönüştürür.
     BAUD_RATE_CODES = {
         10: 0,
         20: 1,
@@ -40,6 +38,14 @@ class EncoderConfigurator:
     def __init__(self, client: CANopenClient):
         self.client = client
 
+    @staticmethod
+    def _success(message):
+        print(f"✓ {message}")
+
+    @staticmethod
+    def _error(message):
+        print(f"✗ {message}")
+
     def _write_and_verify(
         self,
         title,
@@ -53,8 +59,6 @@ class EncoderConfigurator:
         tekrar okuyarak yazma işlemini doğrular.
         """
 
-        print(f"\n{title} ayarlanıyor...")
-
         written = self.client.write_object(
             index=index,
             subindex=subindex,
@@ -64,7 +68,7 @@ class EncoderConfigurator:
         )
 
         if not written:
-            print(f"{title} yazılamadı.")
+            self._error(f"{title} yazılamadı.")
             return False
 
         response = self.client.read_object(
@@ -74,32 +78,27 @@ class EncoderConfigurator:
         )
 
         if response is None:
-            print(f"{title} tekrar okunamadı.")
+            self._error(f"{title} tekrar okunamadı.")
             return False
 
         if response.value != value:
-            print(
+            self._error(
                 f"{title} doğrulanamadı. "
                 f"Beklenen: {value}, "
-                f"Okunan: {response.value}"
+                f"okunan: {response.value}"
             )
             return False
 
-        print(f"{title} başarıyla doğrulandı.")
+        self._success(f"{title} ayarlandı.")
         return True
 
     def configure_node_id(self, new_node_id):
         """
         Encoder'ın yeni Node ID değerini yazar.
-
-        Node ID 1 ile 127 arasında olmalıdır.
-        Yeni değer kalıcı kayıt ve yeniden başlatma sonrasında
-        aktif hâle gelir.
         """
 
         if not 1 <= new_node_id <= 127:
-            print(
-                "\nGeçersiz Node ID. "
+            self._error(
                 "Node ID 1 ile 127 arasında olmalıdır."
             )
             return False
@@ -114,9 +113,8 @@ class EncoderConfigurator:
 
     def configure_baud_rate(self, baud_rate):
         """
-        Kullanıcının verdiği kbit/s değerini encoder'ın
-        baud rate seçim koduna dönüştürür ve 0x2100:00
-        nesnesine yazar.
+        Baud rate değerini encoder'ın beklediği seçim koduna
+        dönüştürerek Object Dictionary'ye yazar.
         """
 
         if baud_rate not in self.BAUD_RATE_CODES:
@@ -125,26 +123,14 @@ class EncoderConfigurator:
                 for rate in self.BAUD_RATE_CODES
             )
 
-            print(
-                f"\nDesteklenmeyen baud rate: "
-                f"{baud_rate} kbit/s"
+            self._error(
+                f"Desteklenmeyen baud rate: "
+                f"{baud_rate} kbit/s. "
+                f"Geçerli değerler: {supported_rates} kbit/s"
             )
-            print(
-                f"Desteklenen baud rate değerleri: "
-                f"{supported_rates} kbit/s"
-            )
-
             return False
 
         baud_rate_code = self.BAUD_RATE_CODES[baud_rate]
-
-        print(
-            f"\nSeçilen baud rate: {baud_rate} kbit/s"
-        )
-        print(
-            f"Encodera yazılacak baud rate kodu: "
-            f"{baud_rate_code}"
-        )
 
         return self._write_and_verify(
             title=f"Baud Rate ({baud_rate} kbit/s)",
@@ -159,18 +145,16 @@ class EncoderConfigurator:
         Encoder'ın bütün yapılandırma parametrelerini uygular.
         """
 
-        heartbeat_ok = self._write_and_verify(
+        if not self._write_and_verify(
             title="Producer Heartbeat Time",
             index=ObjectDictionary.PRODUCER_HEARTBEAT_TIME,
             subindex=0,
             value=settings.heartbeat_time_ms,
             size=2
-        )
-
-        if not heartbeat_ok:
+        ):
             return False
 
-        transmission_ok = self._write_and_verify(
+        if not self._write_and_verify(
             title="Transmission Type",
             index=ObjectDictionary.TPDO1_COMMUNICATION_PARAMETER,
             subindex=(
@@ -179,34 +163,26 @@ class EncoderConfigurator:
             ),
             value=settings.transmission_type,
             size=1
-        )
-
-        if not transmission_ok:
+        ):
             return False
 
-        event_time_ok = self._write_and_verify(
+        if not self._write_and_verify(
             title="Event Time",
             index=ObjectDictionary.TPDO1_COMMUNICATION_PARAMETER,
             subindex=ObjectDictionary.TPDO1_EVENT_TIMER_SUBINDEX,
             value=settings.event_time_ms,
             size=2
-        )
-
-        if not event_time_ok:
+        ):
             return False
 
-        node_id_ok = self.configure_node_id(
+        if not self.configure_node_id(
             new_node_id=settings.new_node_id
-        )
-
-        if not node_id_ok:
+        ):
             return False
 
-        baud_rate_ok = self.configure_baud_rate(
+        if not self.configure_baud_rate(
             baud_rate=settings.baud_rate
-        )
-
-        if not baud_rate_ok:
+        ):
             return False
 
         return True
@@ -216,8 +192,6 @@ class EncoderConfigurator:
         Yapılandırma parametrelerini encoder'ın kalıcı
         hafızasına kaydeder.
         """
-
-        print("\nAyarlar kalıcı hafızaya kaydediliyor...")
 
         saved = self.client.write_object(
             index=ObjectDictionary.STORE_PARAMETERS,
@@ -231,12 +205,10 @@ class EncoderConfigurator:
         )
 
         if not saved:
-            print("EEPROM kayıt işlemi başarısız.")
+            self._error(
+                "EEPROM kayıt işlemi başarısız."
+            )
             return False
-
-        print(
-            "EEPROM kayıt komutu encoder tarafından kabul edildi."
-        )
 
         return True
 
