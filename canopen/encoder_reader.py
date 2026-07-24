@@ -1,11 +1,15 @@
 """
-CANopen encoder kimlik bilgilerini ve anlık pozisyon değerini okur.
+CANopen encoder kimlik bilgilerini, preset değerini
+ve anlık pozisyon değerini okur.
 
 Identity Object:
     0x1018:01 -> Vendor ID
     0x1018:02 -> Product Code
     0x1018:03 -> Revision Number
     0x1018:04 -> Serial Number
+
+Preset Value:
+    0x6003:00 -> Atanmış preset değeri
 
 Position Value:
     0x6004:00 -> Anlık pozisyon
@@ -23,6 +27,7 @@ class EncoderInformation:
     revision_number: int | None
     serial_number: int | None
     position: int | None
+    preset_value: int | None
 
 
 class EncoderReader:
@@ -69,9 +74,22 @@ class EncoderReader:
             ),
         }
 
+    def read_preset_value(self, timeout=3.0):
+        """
+        Encoder'ın 0x6003:00 Preset Value değerini
+        unsigned 32-bit olarak okur.
+        """
+
+        return self._read_unsigned(
+            index=ObjectDictionary.PRESET_VALUE,
+            subindex=0,
+            timeout=timeout,
+        )
+
     def read_position(self, timeout=3.0):
         """
-        Encoder'ın 0x6004:00 anlık pozisyon değerini signed 32-bit okur.
+        Encoder'ın 0x6004:00 anlık pozisyon değerini
+        signed 32-bit olarak okur.
         """
 
         response = self.client.read_object(
@@ -87,6 +105,7 @@ class EncoderReader:
 
     def read_all(self, timeout=3.0):
         identity = self.read_identity(timeout=timeout)
+        preset_value = self.read_preset_value(timeout=timeout)
         position = self.read_position(timeout=timeout)
 
         return EncoderInformation(
@@ -95,4 +114,5 @@ class EncoderReader:
             revision_number=identity["revision_number"],
             serial_number=identity["serial_number"],
             position=position,
+            preset_value=preset_value,
         )

@@ -6,6 +6,10 @@ from canopen.object_dictionary import ObjectDictionary
 
 @dataclass
 class EncoderSettings:
+    """
+    Encoder'a yazılacak yapılandırma değerlerini tutar.
+    """
+
     current_node_id: int
     new_node_id: int
     baud_rate: int
@@ -13,6 +17,7 @@ class EncoderSettings:
     heartbeat_time_ms: int = 100
     transmission_type: int = 255
     event_time_ms: int = 80
+    preset_value: int = 0
 
 
 class EncoderConfigurator:
@@ -52,7 +57,7 @@ class EncoderConfigurator:
         index,
         subindex,
         value,
-        size
+        size,
     ):
         """
         Object Dictionary kaydına değer yazar ve aynı kaydı
@@ -64,7 +69,7 @@ class EncoderConfigurator:
             subindex=subindex,
             value=value,
             size=size,
-            timeout=3.0
+            timeout=3.0,
         )
 
         if not written:
@@ -74,7 +79,7 @@ class EncoderConfigurator:
         response = self.client.read_object(
             index=index,
             subindex=subindex,
-            timeout=3.0
+            timeout=3.0,
         )
 
         if response is None:
@@ -108,7 +113,7 @@ class EncoderConfigurator:
             index=ObjectDictionary.NODE_ID,
             subindex=0,
             value=new_node_id,
-            size=1
+            size=1,
         )
 
     def configure_baud_rate(self, baud_rate):
@@ -126,7 +131,8 @@ class EncoderConfigurator:
             self._error(
                 f"Desteklenmeyen baud rate: "
                 f"{baud_rate} kbit/s. "
-                f"Geçerli değerler: {supported_rates} kbit/s"
+                f"Geçerli değerler: "
+                f"{supported_rates} kbit/s"
             )
             return False
 
@@ -137,12 +143,38 @@ class EncoderConfigurator:
             index=ObjectDictionary.BAUD_RATE,
             subindex=0,
             value=baud_rate_code,
-            size=1
+            size=1,
+        )
+
+    def configure_preset_value(self, preset_value):
+        """
+        Encoder'ın mevcut mekanik konumuna atanacak
+        preset değerini yazar.
+
+        Preset Value nesnesi 32 bit unsigned değerdir.
+        """
+
+        if not 0 <= preset_value <= 0xFFFFFFFF:
+            self._error(
+                "Preset Value 0 ile 4294967295 "
+                "arasında olmalıdır."
+            )
+            return False
+
+        return self._write_and_verify(
+            title="Preset Value",
+            index=ObjectDictionary.PRESET_VALUE,
+            subindex=0,
+            value=preset_value,
+            size=4,
         )
 
     def configure(self, settings: EncoderSettings):
         """
         Encoder'ın bütün yapılandırma parametrelerini uygular.
+
+        Sırasıyla heartbeat, TPDO transmission type,
+        TPDO event time, preset value, Node ID ve baud rate yazılır.
         """
 
         if not self._write_and_verify(
@@ -150,7 +182,7 @@ class EncoderConfigurator:
             index=ObjectDictionary.PRODUCER_HEARTBEAT_TIME,
             subindex=0,
             value=settings.heartbeat_time_ms,
-            size=2
+            size=2,
         ):
             return False
 
@@ -162,16 +194,24 @@ class EncoderConfigurator:
                 .TPDO1_TRANSMISSION_TYPE_SUBINDEX
             ),
             value=settings.transmission_type,
-            size=1
+            size=1,
         ):
             return False
 
         if not self._write_and_verify(
             title="Event Time",
             index=ObjectDictionary.TPDO1_COMMUNICATION_PARAMETER,
-            subindex=ObjectDictionary.TPDO1_EVENT_TIMER_SUBINDEX,
+            subindex=(
+                ObjectDictionary
+                .TPDO1_EVENT_TIMER_SUBINDEX
+            ),
             value=settings.event_time_ms,
-            size=2
+            size=2,
+        ):
+            return False
+
+        if not self.configure_preset_value(
+            preset_value=settings.preset_value
         ):
             return False
 
@@ -191,6 +231,8 @@ class EncoderConfigurator:
         """
         Yapılandırma parametrelerini encoder'ın kalıcı
         hafızasına kaydeder.
+
+        0x1010:01 nesnesine "save" imzası yazılır.
         """
 
         saved = self.client.write_object(
@@ -201,7 +243,7 @@ class EncoderConfigurator:
             ),
             value=ObjectDictionary.SAVE_SIGNATURE,
             size=4,
-            timeout=5.0
+            timeout=5.0,
         )
 
         if not saved:
@@ -210,6 +252,43 @@ class EncoderConfigurator:
             )
             return False
 
+        self._success(
+            "Parametreler kalıcı hafızaya kaydedildi."
+        )
+        return True
+
+    def restore_default_parameters(self):
+        """
+        Encoder parametrelerini fabrika varsayılanlarına döndürür.
+
+        0x1011:01 nesnesine "load" imzası yazılır.
+        """
+
+        restored = self.client.write_object(
+            index=(
+                ObjectDictionary
+                .RESTORE_DEFAULT_PARAMETERS
+            ),
+            subindex=(
+                ObjectDictionary
+                .RESTORE_ALL_PARAMETERS_SUBINDEX
+            ),
+            value=ObjectDictionary.RESTORE_SIGNATURE,
+            size=4,
+            timeout=5.0,
+        )
+
+        if not restored:
+            self._error(
+                "Fabrika ayarlarını geri yükleme "
+                "işlemi başarısız."
+            )
+            return False
+
+        self._success(
+            "Fabrika ayarlarını geri yükleme "
+            "komutu kabul edildi."
+        )
         return True
 
     def read_settings(self):
@@ -220,19 +299,19 @@ class EncoderConfigurator:
         node_id = self.client.read_object(
             index=ObjectDictionary.NODE_ID,
             subindex=0,
-            timeout=3.0
+            timeout=3.0,
         )
 
         baud_rate = self.client.read_object(
             index=ObjectDictionary.BAUD_RATE,
             subindex=0,
-            timeout=3.0
+            timeout=3.0,
         )
 
         heartbeat = self.client.read_object(
             index=ObjectDictionary.PRODUCER_HEARTBEAT_TIME,
             subindex=0,
-            timeout=3.0
+            timeout=3.0,
         )
 
         transmission = self.client.read_object(
@@ -241,29 +320,53 @@ class EncoderConfigurator:
                 ObjectDictionary
                 .TPDO1_TRANSMISSION_TYPE_SUBINDEX
             ),
-            timeout=3.0
+            timeout=3.0,
         )
 
         event_time = self.client.read_object(
             index=ObjectDictionary.TPDO1_COMMUNICATION_PARAMETER,
-            subindex=ObjectDictionary.TPDO1_EVENT_TIMER_SUBINDEX,
-            timeout=3.0
+            subindex=(
+                ObjectDictionary
+                .TPDO1_EVENT_TIMER_SUBINDEX
+            ),
+            timeout=3.0,
+        )
+
+        preset_value = self.client.read_object(
+            index=ObjectDictionary.PRESET_VALUE,
+            subindex=0,
+            timeout=3.0,
         )
 
         return {
             "node_id": (
-                node_id.value if node_id else None
+                node_id.value
+                if node_id is not None
+                else None
             ),
             "baud_rate_code": (
-                baud_rate.value if baud_rate else None
+                baud_rate.value
+                if baud_rate is not None
+                else None
             ),
             "heartbeat_time_ms": (
-                heartbeat.value if heartbeat else None
+                heartbeat.value
+                if heartbeat is not None
+                else None
             ),
             "transmission_type": (
-                transmission.value if transmission else None
+                transmission.value
+                if transmission is not None
+                else None
             ),
             "event_time_ms": (
-                event_time.value if event_time else None
+                event_time.value
+                if event_time is not None
+                else None
+            ),
+            "preset_value": (
+                preset_value.value
+                if preset_value is not None
+                else None
             ),
         }

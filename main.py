@@ -1,9 +1,10 @@
 """
 Uygulamanın başlangıç noktasıdır.
 
-Kullanıcıdan yeni Node ID ve baud rate değerlerini alır.
-Encoder ayarlarını CANopen üzerinden uygular, kalıcı belleğe kaydeder,
-iletişimi yeniden başlatır ve yeni bağlantı bilgileriyle doğrular.
+CANopen ağındaki encoder'ı tarar.
+
+Kullanıcı isterse encoder parametrelerini yapılandırır ve kaydeder,
+isterse Restore Parameters komutuyla fabrika ayarlarını geri yükler.
 """
 
 import time
@@ -150,14 +151,65 @@ def read_baud_rate(prompt, default_value=None):
         return baud_rate
 
 
-def read_confirmation():
+def read_operation():
     """
-    Kullanıcıdan yapılandırma işlemi için onay alır.
+    Kullanıcının yapmak istediği işlemi seçmesini sağlar.
+    """
+
+    print("\nYapılacak işlem")
+    print("----------------")
+    print("1 - Encoder'ı yapılandır")
+    print("2 - Fabrika ayarlarını geri yükle")
+    print("0 - Çıkış")
+
+    while True:
+        choice = input("\nSeçiminiz: ").strip()
+
+        if choice in ("0", "1", "2"):
+            return choice
+
+        print_warning(
+            "Lütfen 0, 1 veya 2 girin."
+        )
+
+
+def read_configuration_confirmation():
+    """
+    Yapılandırma işlemi için kullanıcıdan onay alır.
     """
 
     while True:
         answer = input(
             "\nBu ayarlar encodera yazılsın mı? (E/H): "
+        ).strip().lower()
+
+        if answer in ("e", "evet", "y", "yes"):
+            return True
+
+        if answer in ("h", "hayır", "hayir", "n", "no"):
+            return False
+
+        print_warning("Lütfen E veya H girin.")
+
+
+def read_restore_confirmation():
+    """
+    Fabrika ayarlarını geri yükleme işlemi için onay alır.
+    """
+
+    print("\nDİKKAT")
+    print("------")
+    print(
+        "Bu işlem encoder parametrelerini "
+        "fabrika varsayılanlarına döndürecektir."
+    )
+    print(
+        "Node ID ve baud rate değerleri de değişebilir."
+    )
+
+    while True:
+        answer = input(
+            "\nFabrika ayarları geri yüklensin mi? (E/H): "
         ).strip().lower()
 
         if answer in ("e", "evet", "y", "yes"):
@@ -336,7 +388,7 @@ def select_scanned_node(found_nodes):
 
     while True:
         selected_node_id = read_node_id(
-            "Yapılandırılacak Node ID "
+            "Kullanılacak Node ID "
             "(decimal veya 0x ile hexadecimal)"
         )
 
@@ -400,6 +452,209 @@ def print_encoder_information(client):
         )
 
 
+def configure_encoder(
+    can_bus,
+    client,
+    current_node_id,
+    current_baud_rate,
+):
+    """
+    Encoder yapılandırma işlemini gerçekleştirir.
+    """
+
+    settings, current_baud_rate = get_user_settings(
+        current_node_id=current_node_id,
+        current_baud_rate=current_baud_rate,
+    )
+
+    print_configuration(
+        settings=settings,
+        current_baud_rate=current_baud_rate,
+    )
+
+    if not read_configuration_confirmation():
+        print_warning(
+            "İşlem kullanıcı tarafından iptal edildi."
+        )
+        return
+
+    print("\nYapılandırma başlatılıyor...\n")
+
+    client.change_node_id(
+        settings.current_node_id
+    )
+
+    configurator = EncoderConfigurator(
+        client=client
+    )
+
+    configured = configurator.configure(
+        settings=settings
+    )
+
+    if not configured:
+        print_error(
+            "Encoder yapılandırılamadı."
+        )
+        return
+
+    saved = configurator.save()
+
+    if not saved:
+        print_error(
+            "Ayarlar kalıcı hafızaya kaydedilemedi."
+        )
+        return
+
+    print_success(
+        "Ayarlar EEPROM'a kaydedildi."
+    )
+
+    time.sleep(1.0)
+
+    client.reset_communication(
+        node_id=settings.current_node_id
+    )
+
+    print_success(
+        "Reset Communication gönderildi."
+    )
+
+    can_bus.reconnect(
+        bitrate=BITRATE_VALUES[
+            settings.baud_rate
+        ]
+    )
+
+    print_success(
+        f"CAN bağlantısı "
+        f"{settings.baud_rate} kbit/s "
+        f"ile yeniden açıldı."
+    )
+
+    state = client.wait_for_heartbeat(
+        node_id=settings.new_node_id,
+        timeout=8.0,
+    )
+
+    if state is None:
+        print_error(
+            "Encoder yeni bağlantı bilgileriyle bulunamadı."
+        )
+        print(
+            f"  Beklenen Node ID   : "
+            f"0x{settings.new_node_id:02X}"
+        )
+        print(
+            f"  Beklenen baud rate : "
+            f"{settings.baud_rate} kbit/s"
+        )
+        return
+
+    print_success(
+        "Heartbeat doğrulandı."
+    )
+
+    client.change_node_id(
+        settings.new_node_id
+    )
+
+    if not verify_new_connection(
+        client=client,
+        settings=settings,
+    ):
+        return
+
+    print_success(
+        "SDO haberleşmesi doğrulandı."
+    )
+
+    save_encoder_state(
+        settings.new_node_id,
+        settings.baud_rate
+    )
+
+    print_success(
+        "Son encoder durumu kaydedildi."
+    )
+
+    print("\n--------------------------------")
+    print("Encoder başarıyla yapılandırıldı")
+    print("--------------------------------")
+
+    print(
+        f"Node ID   : "
+        f"0x{settings.new_node_id:02X}"
+    )
+    print(
+        f"Baud Rate : "
+        f"{settings.baud_rate} kbit/s"
+    )
+
+
+def restore_encoder(client, current_node_id):
+    """
+    Encoder'a Restore Default Parameters komutunu gönderir.
+    """
+
+    if not read_restore_confirmation():
+        print_warning(
+            "Restore işlemi kullanıcı tarafından iptal edildi."
+        )
+        return
+
+    print("\nFabrika ayarları geri yükleniyor...\n")
+
+    client.change_node_id(
+        current_node_id
+    )
+
+    configurator = EncoderConfigurator(
+        client=client
+    )
+
+    restored = configurator.restore_default_parameters()
+
+    if not restored:
+        print_error(
+            "Restore Parameters komutu başarısız oldu."
+        )
+        return
+
+    print_success(
+        "Restore Parameters komutu encoder tarafından kabul edildi."
+    )
+
+    time.sleep(1.0)
+
+    client.reset_communication(
+        node_id=current_node_id
+    )
+
+    print_success(
+        "Reset Communication gönderildi."
+    )
+
+    print("\n-----------------------------------------")
+    print("Fabrika ayarlarını geri yükleme başlatıldı")
+    print("-----------------------------------------")
+
+    print(
+        "Restore edilen değerlerin tamamen etkinleşmesi için "
+        "encoder'ın enerjisini kapatıp tekrar açın."
+    )
+
+    print(
+        "Restore sonrasında Node ID ve baud rate fabrika "
+        "varsayılanlarına dönmüş olabilir."
+    )
+
+    print(
+        "Bu nedenle cihaz mevcut baud rate ile bulunamazsa "
+        "desteklenen baud rate değerlerinde yeniden taranmalıdır."
+    )
+
+
 def main():
     can_bus = CanBus()
 
@@ -424,7 +679,7 @@ def main():
 
         if not found_nodes:
             print_error(
-                "Yapılandırma başlatılamadı. "
+                "İşlem başlatılamadı. "
                 "Önce encoder bağlantısını ve baud rate değerini kontrol edin."
             )
             return
@@ -442,136 +697,27 @@ def main():
             client=client
         )
 
-        settings, current_baud_rate = get_user_settings(
-            current_node_id=current_node_id,
-            current_baud_rate=current_baud_rate,
-        )
+        operation = read_operation()
 
-        print_configuration(
-            settings=settings,
-            current_baud_rate=current_baud_rate,
-        )
-
-        if not read_confirmation():
+        if operation == "0":
             print_warning(
-                "İşlem kullanıcı tarafından iptal edildi."
+                "Program kapatıldı."
             )
             return
 
-        print("\nYapılandırma başlatılıyor...\n")
-
-        client.change_node_id(
-            settings.current_node_id
-        )
-
-        configurator = EncoderConfigurator(
-            client=client
-        )
-
-        configured = configurator.configure(
-            settings=settings
-        )
-
-        if not configured:
-            print_error(
-                "Encoder yapılandırılamadı."
+        if operation == "1":
+            configure_encoder(
+                can_bus=can_bus,
+                client=client,
+                current_node_id=current_node_id,
+                current_baud_rate=current_baud_rate,
             )
-            return
 
-        saved = configurator.save()
-
-        if not saved:
-            print_error(
-                "Ayarlar kalıcı hafızaya "
-                "kaydedilemedi."
+        elif operation == "2":
+            restore_encoder(
+                client=client,
+                current_node_id=current_node_id,
             )
-            return
-
-        print_success(
-            "Ayarlar EEPROM'a kaydedildi."
-        )
-
-        time.sleep(1.0)
-
-        client.reset_communication(
-            node_id=settings.current_node_id
-        )
-
-        print_success(
-            "Reset Communication gönderildi."
-        )
-
-        can_bus.reconnect(
-            bitrate=BITRATE_VALUES[
-                settings.baud_rate
-            ]
-        )
-
-        print_success(
-            f"CAN bağlantısı "
-            f"{settings.baud_rate} kbit/s "
-            f"ile yeniden açıldı."
-        )
-
-        state = client.wait_for_heartbeat(
-            node_id=settings.new_node_id,
-            timeout=8.0,
-        )
-
-        if state is None:
-            print_error(
-                "Encoder yeni bağlantı "
-                "bilgileriyle bulunamadı."
-            )
-            print(
-                f"  Beklenen Node ID   : "
-                f"0x{settings.new_node_id:02X}"
-            )
-            print(
-                f"  Beklenen baud rate : "
-                f"{settings.baud_rate} kbit/s"
-            )
-            return
-
-        print_success(
-            "Heartbeat doğrulandı."
-        )
-
-        client.change_node_id(
-            settings.new_node_id
-        )
-
-        if not verify_new_connection(
-            client=client,
-            settings=settings,
-        ):
-            return
-
-        print_success(
-            "SDO haberleşmesi doğrulandı."
-        )
-
-        save_encoder_state(
-            settings.new_node_id,
-            settings.baud_rate
-        )
-
-        print_success(
-            "Son encoder durumu kaydedildi."
-        )
-
-        print("\n--------------------------------")
-        print("Encoder başarıyla yapılandırıldı")
-        print("--------------------------------")
-
-        print(
-            f"Node ID   : "
-            f"0x{settings.new_node_id:02X}"
-        )
-        print(
-            f"Baud Rate : "
-            f"{settings.baud_rate} kbit/s"
-        )
 
     except KeyboardInterrupt:
         print_warning(
