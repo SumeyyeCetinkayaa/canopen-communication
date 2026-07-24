@@ -10,11 +10,13 @@ import time
 
 from bus.can_bus import CanBus
 from canopen.client import CANopenClient
+from canopen.encoder_reader import EncoderReader
 from canopen.encoder_configurator import (
     EncoderConfigurator,
     EncoderSettings,
 )
 from canopen.object_dictionary import ObjectDictionary
+from canopen.node_scanner import NodeScanner
 from encoder_state import load_encoder_state, save_encoder_state
 
 
@@ -45,12 +47,13 @@ def print_warning(message):
 
 def parse_node_id(value):
     """
-    Node ID değerini decimal veya hexadecimal olarak kabul eder.
+    Node ID değerini decimal veya 0x önekli hexadecimal olarak kabul eder.
 
-    Örnek:
-        90
-        0x5A
-        5A
+    Kurallar:
+        40   -> decimal 40
+        0x28 -> hexadecimal 40
+
+    Öneksiz girilen tüm değerler decimal kabul edilir.
     """
 
     cleaned_value = value.strip()
@@ -61,19 +64,13 @@ def parse_node_id(value):
     try:
         if cleaned_value.lower().startswith("0x"):
             node_id = int(cleaned_value, 16)
-
-        elif any(
-            character in "abcdefABCDEF"
-            for character in cleaned_value
-        ):
-            node_id = int(cleaned_value, 16)
-
         else:
             node_id = int(cleaned_value, 10)
 
     except ValueError as error:
         raise ValueError(
-            "Node ID decimal veya hexadecimal bir sayı olmalıdır."
+            "Node ID decimal veya 0x önekli hexadecimal olmalıdır. "
+            "Örnek: 40 veya 0x28."
         ) from error
 
     if not 1 <= node_id <= 127:
@@ -203,14 +200,10 @@ def print_configuration(settings, current_baud_rate):
     )
 
 
-def get_user_settings():
+def get_user_settings(current_node_id, current_baud_rate):
     """
     Encoder yapılandırma değerlerini kullanıcıdan alır.
     """
-
-    current_node_id, current_baud_rate = (
-        load_encoder_state()
-    )
 
     print("\nCANopen Encoder Yapılandırması")
     print("------------------------------")
@@ -223,8 +216,13 @@ def get_user_settings():
         f"{current_baud_rate} kbit/s"
     )
     print(
-        "Node ID için 91, 0x5B veya 5B "
-        "biçimi kullanılabilir."
+        "Node ID decimal veya 0x önekli hexadecimal girilebilir."
+    )
+    print(
+        "Örnek: 40 (decimal) veya 0x28 (hexadecimal)."
+    )
+    print(
+        "Sadece sayı girilirse decimal kabul edilir."
     )
     print(
         "Varsayılan değeri kullanmak için "
@@ -232,7 +230,7 @@ def get_user_settings():
     )
 
     new_node_id = read_node_id(
-        prompt="Yeni Node ID",
+        prompt="Yeni Node ID (decimal veya 0x ile hexadecimal)",
         default_value=current_node_id,
     )
 
@@ -321,12 +319,132 @@ def verify_new_connection(client, settings):
     return True
 
 
+def select_scanned_node(found_nodes):
+    """
+    Tarama sonucunda bulunan node'lardan kullanılacak olanı seçer.
+    """
+
+    if len(found_nodes) == 1:
+        return found_nodes[0].node_id
+
+    valid_node_ids = {
+        node.node_id
+        for node in found_nodes
+    }
+
+    print("\nBirden fazla CANopen node bulundu.")
+
+    while True:
+        selected_node_id = read_node_id(
+            "Yapılandırılacak Node ID "
+            "(decimal veya 0x ile hexadecimal)"
+        )
+
+        if selected_node_id in valid_node_ids:
+            return selected_node_id
+
+        print_error(
+            "Seçilen Node ID tarama sonucunda bulunmadı."
+        )
+
+
+def format_hex(value, width=8):
+    """
+    Okunamayan değerler için '-' gösterir.
+    """
+
+    if value is None:
+        return "-"
+
+    return f"0x{value:0{width}X}"
+
+
+def print_encoder_information(client):
+    """
+    Encoder Identity Object ve anlık pozisyon bilgisini gösterir.
+    """
+
+    reader = EncoderReader(
+        client=client
+    )
+
+    information = reader.read_all(
+        timeout=3.0
+    )
+
+    print("\nEncoder bilgileri")
+    print("------------------")
+    print(
+        f"Vendor ID       : "
+        f"{format_hex(information.vendor_id)}"
+    )
+    print(
+        f"Product Code    : "
+        f"{format_hex(information.product_code)}"
+    )
+    print(
+        f"Revision Number : "
+        f"{format_hex(information.revision_number)}"
+    )
+    print(
+        f"Serial Number   : "
+        f"{format_hex(information.serial_number)}"
+    )
+
+    if information.position is None:
+        print("Position Value  : Okunamadı")
+    else:
+        print(
+            f"Position Value  : "
+            f"{information.position}"
+        )
+
+
 def main():
     can_bus = CanBus()
 
     try:
-        settings, current_baud_rate = (
-            get_user_settings()
+        _, current_baud_rate = load_encoder_state()
+
+        can_bus.connect(
+            bitrate=BITRATE_VALUES[
+                current_baud_rate
+            ]
+        )
+
+        scanner = NodeScanner(
+            can_bus=can_bus
+        )
+
+        found_nodes = scanner.scan(
+            start_node_id=1,
+            end_node_id=127,
+            timeout=0.05,
+        )
+
+        if not found_nodes:
+            print_error(
+                "Yapılandırma başlatılamadı. "
+                "Önce encoder bağlantısını ve baud rate değerini kontrol edin."
+            )
+            return
+
+        current_node_id = select_scanned_node(
+            found_nodes
+        )
+
+        client = CANopenClient(
+            can_bus=can_bus,
+            node_id=current_node_id,
+        )
+
+        print_encoder_information(
+            client=client
+        )
+
+        settings, current_baud_rate = get_user_settings(
+            current_node_id=current_node_id,
+            current_baud_rate=current_baud_rate,
         )
 
         print_configuration(
@@ -342,15 +460,8 @@ def main():
 
         print("\nYapılandırma başlatılıyor...\n")
 
-        can_bus.connect(
-            bitrate=BITRATE_VALUES[
-                current_baud_rate
-            ]
-        )
-
-        client = CANopenClient(
-            can_bus=can_bus,
-            node_id=settings.current_node_id,
+        client.change_node_id(
+            settings.current_node_id
         )
 
         configurator = EncoderConfigurator(

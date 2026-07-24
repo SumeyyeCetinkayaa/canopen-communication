@@ -37,7 +37,7 @@ class CANopenClient:
         if DEBUG:
             print(message)
 
-    def _wait_for_sdo_response(self, request, timeout):
+    def _wait_for_sdo_response(self, request, timeout, silent=False):
         """
         Gönderilen SDO isteğine ait cevabı bekler.
 
@@ -54,8 +54,16 @@ class CANopenClient:
 
         start_time = time.monotonic()
 
-        while time.monotonic() - start_time < timeout:
-            response_msg = self.can_bus.read_message()
+        while True:
+            elapsed_time = time.monotonic() - start_time
+            remaining_time = timeout - elapsed_time
+
+            if remaining_time <= 0:
+                break
+
+            response_msg = self.can_bus.read_message(
+                timeout=remaining_time
+            )
 
             if response_msg is None:
                 continue
@@ -83,20 +91,22 @@ class CANopenClient:
                 continue
 
             if response.is_abort():
-                print("✗ Cihaz SDO Abort cevabı gönderdi.")
+                if not silent:
+                    print("✗ Cihaz SDO Abort cevabı gönderdi.")
                 self._debug(response)
                 return None
 
             return response
 
-        print(
-            f"✗ {timeout} saniye içinde SDO cevabı alınamadı. "
-            f"Beklenen CAN ID: 0x{expected_response_id:03X}"
-        )
+        if not silent:
+            print(
+                f"✗ {timeout} saniye içinde SDO cevabı alınamadı. "
+                f"Beklenen CAN ID: 0x{expected_response_id:03X}"
+            )
 
         return None
 
-    def read_object(self, index, subindex=0, timeout=3.0):
+    def read_object(self, index, subindex=0, timeout=3.0, silent=False):
         """
         Object Dictionary içerisindeki bir nesneyi SDO ile okur.
         """
@@ -118,7 +128,8 @@ class CANopenClient:
 
         response = self._wait_for_sdo_response(
             request=request,
-            timeout=timeout
+            timeout=timeout,
+            silent=silent
         )
 
         if response is None:

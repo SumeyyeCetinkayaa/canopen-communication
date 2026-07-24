@@ -48,8 +48,23 @@ class CanBus:
     def send_message(self, message):
         self.adapter.send(message)
 
-    def read_message(self):
-        return self.adapter.recv(timeout=READ_TIMEOUT)
+    def read_message(self, timeout=None):
+        """
+        CAN hattından mesaj okur.
+
+        timeout verilmezse config.py içindeki READ_TIMEOUT kullanılır.
+        Tarama gibi hızlı işlemler kendi kısa timeout değerini verebilir.
+        """
+
+        effective_timeout = (
+            READ_TIMEOUT
+            if timeout is None
+            else timeout
+        )
+
+        return self.adapter.recv(
+            timeout=effective_timeout
+        )
 
     def shutdown(self):
         self.adapter.shutdown()
