@@ -6,7 +6,7 @@ QMainWindow {
 QWidget {
     color: #d8dde5;
     font-family: "Segoe UI";
-    font-size: 12px;
+    font-size: 13px;
 }
 
 
@@ -240,7 +240,7 @@ QPushButton {
     padding: 4px 10px;
     min-height: 24px;
 
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 600;
 }
 
@@ -380,4 +380,96 @@ QMessageBox QPushButton {
     min-width: 68px;
     min-height: 22px;
 }
+
+
+/* -------------------------------------------------- */
+/* Sistem Durum Paneli */
+/* -------------------------------------------------- */
+
+QLabel#statusTitle {
+    color: #768390;
+    font-family: "Segoe UI";
+    font-size: 10px;
+    font-weight: 600;
+}
+
+QLabel#statusValue {
+    color: #d8dee9;
+    font-family: "Segoe UI";
+    font-size: 13px;
+    font-weight: 600;
+}
+
+QLabel#statusConnected {
+    color: #3ddc97;
+    font-family: "Segoe UI";
+    font-size: 13px;
+    font-weight: 700;
+}
+
+QLabel#statusDisconnected {
+    color: #f47067;
+    font-family: "Segoe UI";
+    font-size: 13px;
+    font-weight: 700;
+}
+
+QLabel#statusWarning {
+    color: #e3b341;
+    font-family: "Segoe UI";
+    font-size: 13px;
+    font-weight: 700;
+}
+
+QLabel#statusInactive {
+    color: #8b949e;
+    font-family: "Segoe UI";
+    font-size: 13px;
+    font-weight: 600;
+}
+
+QFrame#statusVerticalDivider {
+    background-color: #30363d;
+    border: none;
+    min-width: 1px;
+    max-width: 1px;
+}
+
+
+/* -------------------------------------------------- */
+/* Connection Panel Özel Alanları */
+/* -------------------------------------------------- */
+
+QLabel#channelValue {
+    color: #58a6ff;
+    font-family: "Consolas";
+    font-weight: 600;
+}
+
+QPushButton#connectButton {
+    min-width: 105px;
+    background-color: #1f4e79;
+    border-color: #2d689c;
+}
+
+QPushButton#connectButton:hover {
+    background-color: #265d8f;
+    border-color: #387bba;
+}
+
+QPushButton#connectButton[connected="true"] {
+    background-color: #5c282b;
+    border-color: #7d373b;
+}
+
+QPushButton#connectButton[connected="true"]:hover {
+    background-color: #703135;
+    border-color: #964247;
+}
+
+QPushButton#scanButton {
+    min-width: 145px;
+}
 """
+
+

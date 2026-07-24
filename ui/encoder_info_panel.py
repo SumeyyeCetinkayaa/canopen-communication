@@ -8,7 +8,7 @@ from PySide6.QtWidgets import QFormLayout, QGroupBox, QLabel
 class EncoderInfoPanel(QGroupBox):
     def __init__(self, parent=None):
         super().__init__("Encoder Information", parent)
-        self.setFixedWidth(230)
+        self.setFixedWidth(250)
         self.vendor_label = QLabel("-")
         self.product_label = QLabel("-")
         self.revision_label = QLabel("-")

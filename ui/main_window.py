@@ -20,6 +20,7 @@ from services.encoder_controller import EncoderController
 from ui.configuration_panel import ConfigurationPanel
 from ui.connection_panel import ConnectionPanel
 from ui.encoder_info_panel import EncoderInfoPanel
+from ui.status_panel import StatusPanel
 
 
 class MainWindow(QMainWindow):
@@ -29,18 +30,22 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(
             "CANopen Encoder Configuration Tool"
         )
-        self.resize(750, 700)
+        self.resize(900, 800)
 
         self.controller = EncoderController(
             log_callback=self.log
         )
 
         self.connection_panel = ConnectionPanel()
+        self.status_panel = StatusPanel()
         self.encoder_info_panel = EncoderInfoPanel()
         self.configuration_panel = ConfigurationPanel()
 
         self.scan_button = QPushButton(
             "CANopen Ağını Tara"
+        )
+        self.scan_button.setObjectName(
+            "scanButton"
         )
 
         self.log_output = QPlainTextEdit()
@@ -50,16 +55,16 @@ class MainWindow(QMainWindow):
         )
         self.log_output.setMaximumBlockCount(120)
 
-        # Position Value değerini düzenli olarak okumak için
-        # kullanılan timer.
         self.position_timer = QTimer(self)
-        self.position_timer.setInterval(200)
+        self.position_timer.setInterval(250)
         self.position_timer.timeout.connect(
             self.update_position
         )
 
         self._create_layout()
         self._connect_buttons()
+
+        self.status_panel.set_disconnected()
 
         self.log(
             "Uygulama hazır. Önce CAN bağlantısını açın."
@@ -69,32 +74,86 @@ class MainWindow(QMainWindow):
         central_widget = QWidget()
         main_layout = QVBoxLayout(central_widget)
 
+        main_layout.setContentsMargins(
+            12,
+            10,
+            12,
+            12,
+        )
+        main_layout.setSpacing(8)
+
         top_layout = QHBoxLayout()
-        top_layout.addWidget(self.connection_panel)
+        top_layout.setSpacing(8)
+
+        top_layout.addWidget(
+            self.connection_panel,
+            4,
+        )
 
         scan_group = QGroupBox("CAN Scan")
         scan_layout = QVBoxLayout(scan_group)
-        scan_layout.addWidget(self.scan_button)
 
-        top_layout.addWidget(scan_group)
+        scan_layout.setContentsMargins(
+            10,
+            12,
+            10,
+            8,
+        )
+
+        scan_layout.addWidget(
+            self.scan_button
+        )
+
+        top_layout.addWidget(
+            scan_group,
+            1,
+        )
 
         middle_layout = QHBoxLayout()
+        middle_layout.setSpacing(8)
+
         middle_layout.addWidget(
-            self.encoder_info_panel
-        )
-        middle_layout.addWidget(
-            self.configuration_panel
+            self.encoder_info_panel,
+            1,
         )
 
-        log_group = QGroupBox("Application Logs")
+        middle_layout.addWidget(
+            self.configuration_panel,
+            2,
+        )
+
+        log_group = QGroupBox(
+            "Application Logs"
+        )
         log_layout = QVBoxLayout(log_group)
-        log_layout.addWidget(self.log_output)
+
+        log_layout.setContentsMargins(
+            8,
+            12,
+            8,
+            8,
+        )
+
+        log_layout.addWidget(
+            self.log_output
+        )
 
         main_layout.addLayout(top_layout)
-        main_layout.addLayout(middle_layout)
-        main_layout.addWidget(log_group)
+        main_layout.addWidget(
+            self.status_panel
+        )
+        main_layout.addLayout(
+            middle_layout,
+            3,
+        )
+        main_layout.addWidget(
+            log_group,
+            2,
+        )
 
-        self.setCentralWidget(central_widget)
+        self.setCentralWidget(
+            central_widget
+        )
 
     def _connect_buttons(self):
         self.connection_panel.connect_button.clicked.connect(
@@ -126,7 +185,13 @@ class MainWindow(QMainWindow):
             self.position_timer.stop()
 
             self.controller.disconnect()
-            self.connection_panel.set_connected(False)
+
+            self.connection_panel.set_connected(
+                False
+            )
+
+            self.status_panel.set_disconnected()
+
             self.clear_encoder_information()
             return
 
@@ -137,15 +202,32 @@ class MainWindow(QMainWindow):
 
         try:
             self.connection_panel.set_connecting()
+            self.status_panel.set_connecting()
+
             QApplication.processEvents()
 
-            self.controller.connect(baud_rate)
-            self.connection_panel.set_connected(True)
+            self.controller.connect(
+                baud_rate
+            )
+
+            self.connection_panel.set_connected(
+                True
+            )
+
+            self.status_panel.set_connected(
+                baud_rate
+            )
 
         except Exception as error:
-            self.connection_panel.set_connected(False)
+            self.connection_panel.set_connected(
+                False
+            )
+
+            self.status_panel.set_disconnected()
+
             self.log(
-                f"✗ CAN bağlantısı kurulamadı: {error}"
+                f"✗ CAN bağlantısı kurulamadı: "
+                f"{error}"
             )
 
     def scan_network(self):
@@ -155,13 +237,15 @@ class MainWindow(QMainWindow):
             )
             return
 
-        # Daha önce canlı pozisyon takibi başladıysa,
-        # tarama sırasında geçici olarak durdurulur.
         self.position_timer.stop()
 
         try:
             self.scan_button.setEnabled(False)
-            self.scan_button.setText("Taranıyor...")
+            self.scan_button.setText(
+                "Taranıyor..."
+            )
+
+            self.status_panel.set_scanning()
 
             self.configuration_panel.set_encoder_available(
                 False
@@ -177,6 +261,11 @@ class MainWindow(QMainWindow):
 
             if result is None:
                 self.clear_encoder_information()
+
+                self.status_panel.set_connected(
+                    self.controller.current_baud_rate
+                )
+
                 return
 
             node_id, information = result
@@ -193,19 +282,36 @@ class MainWindow(QMainWindow):
                 True
             )
 
-            # Encoder başarıyla bulunduğunda canlı pozisyon
-            # takibi başlatılır.
+            heartbeat_time = (
+                self.configuration_panel
+                .heartbeat_time()
+            )
+
+            self.status_panel.set_encoder_detected(
+                node_id=node_id,
+                baud_rate_kbit=(
+                    self.controller
+                    .current_baud_rate
+                ),
+                heartbeat_time_ms=(
+                    heartbeat_time
+                ),
+            )
+
             self.position_timer.start()
 
             self.log(
-                "✓ Encoder bilgileri arayüzde gösterildi."
+                "✓ Encoder bilgileri arayüzde "
+                "gösterildi."
             )
 
         except Exception as error:
             self.clear_encoder_information()
 
+            self.status_panel.set_error()
+
             self.log(
-                f"✗ CANopen ağ taraması başarısız: "
+                "✗ CANopen ağ taraması başarısız: "
                 f"{error}"
             )
 
@@ -217,8 +323,8 @@ class MainWindow(QMainWindow):
 
     def update_position(self):
         """
-        Encoder'ın anlık Position Value değerini okuyarak
-        bilgi panelindeki etiketi günceller.
+        Encoder'ın anlık Position Value değerini
+        okuyarak bilgi panelini günceller.
         """
 
         if self.controller.client is None:
@@ -226,18 +332,25 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            position = self.controller.read_position()
+            position = (
+                self.controller.read_position()
+            )
 
             if position is not None:
                 self.encoder_info_panel.set_position(
                     position
                 )
 
+                self.status_panel.update_last_communication()
+
         except Exception as error:
             self.position_timer.stop()
 
+            self.status_panel.set_error()
+
             self.log(
-                "✗ Position Value takibi durduruldu: "
+                "✗ Position Value takibi "
+                "durduruldu: "
                 f"{error}"
             )
 
@@ -253,10 +366,13 @@ class MainWindow(QMainWindow):
 
         self.controller.clear_encoder()
 
+        self.status_panel.clear_encoder()
+
     def configure_encoder(self):
         if self.controller.client is None:
             self.log(
-                "⚠ Önce CANopen ağını taramalısınız."
+                "⚠ Önce CANopen ağını "
+                "taramalısınız."
             )
             return
 
@@ -267,8 +383,8 @@ class MainWindow(QMainWindow):
                 self,
                 "Yapılandırmayı Onayla",
                 (
-                    "Aşağıdaki ayarlar encodera yazılacak:"
-                    "\n\n"
+                    "Aşağıdaki ayarlar encodera "
+                    "yazılacak:\n\n"
                     f"Node ID: "
                     f"0x{settings.current_node_id:02X} "
                     f"→ 0x{settings.new_node_id:02X}\n"
@@ -295,14 +411,14 @@ class MainWindow(QMainWindow):
                 != QMessageBox.StandardButton.Yes
             ):
                 self.log(
-                    "⚠ Yapılandırma kullanıcı tarafından "
-                    "iptal edildi."
+                    "⚠ Yapılandırma kullanıcı "
+                    "tarafından iptal edildi."
                 )
                 return
 
-            # Yapılandırma sırasında canlı position okuması
-            # yapılmamalı. SDO cevapları karışabilir.
             self.position_timer.stop()
+
+            self.status_panel.set_configuring()
 
             self.configuration_panel.set_configuring()
             self.scan_button.setEnabled(False)
@@ -310,7 +426,9 @@ class MainWindow(QMainWindow):
             QApplication.processEvents()
 
             node_id, baud_rate = (
-                self.controller.configure(settings)
+                self.controller.configure(
+                    settings
+                )
             )
 
             self.connection_panel.set_baud_rate(
@@ -329,12 +447,20 @@ class MainWindow(QMainWindow):
                 settings.preset_value
             )
 
+            self.status_panel.set_encoder_detected(
+                node_id=node_id,
+                baud_rate_kbit=baud_rate,
+                heartbeat_time_ms=(
+                    settings.heartbeat_time_ms
+                ),
+            )
+
             QMessageBox.information(
                 self,
                 "Yapılandırma Başarılı",
                 (
-                    "Encoder başarıyla yapılandırıldı."
-                    "\n\n"
+                    "Encoder başarıyla "
+                    "yapılandırıldı.\n\n"
                     f"Node ID: 0x{node_id:02X}\n"
                     f"Baud Rate: "
                     f"{baud_rate} kbit/s\n"
@@ -344,6 +470,8 @@ class MainWindow(QMainWindow):
             )
 
         except ValueError as error:
+            self.status_panel.set_error()
+
             self.log(
                 f"✗ Geçersiz değer: {error}"
             )
@@ -355,8 +483,11 @@ class MainWindow(QMainWindow):
             )
 
         except Exception as error:
+            self.status_panel.set_error()
+
             self.log(
-                f"✗ Yapılandırma başarısız: {error}"
+                f"✗ Yapılandırma başarısız: "
+                f"{error}"
             )
 
             QMessageBox.critical(
@@ -370,10 +501,6 @@ class MainWindow(QMainWindow):
 
             if self.controller.client is not None:
                 self.configuration_panel.finish_configuring()
-
-                # Yapılandırma tamamlanıp encoder ile iletişim
-                # devam ediyorsa canlı position takibi yeniden
-                # başlatılır.
                 self.position_timer.start()
 
             else:
@@ -415,7 +542,8 @@ class MainWindow(QMainWindow):
     def restore_encoder(self):
         if self.controller.client is None:
             self.log(
-                "⚠ Önce CANopen ağını taramalısınız."
+                "⚠ Önce CANopen ağını "
+                "taramalısınız."
             )
             return
 
@@ -426,8 +554,9 @@ class MainWindow(QMainWindow):
                 "Encoder'ın kayıtlı yapılandırma "
                 "parametreleri fabrika ayarlarına "
                 "döndürülecek.\n\n"
-                "Node ID, baud rate, heartbeat, preset "
-                "ve TPDO ayarları değişebilir.\n\n"
+                "Node ID, baud rate, heartbeat, "
+                "preset ve TPDO ayarları "
+                "değişebilir.\n\n"
                 "İşleme devam edilsin mi?"
             ),
             QMessageBox.StandardButton.Yes
@@ -440,15 +569,16 @@ class MainWindow(QMainWindow):
             != QMessageBox.StandardButton.Yes
         ):
             self.log(
-                "⚠ Fabrika ayarlarına dönüş kullanıcı "
-                "tarafından iptal edildi."
+                "⚠ Fabrika ayarlarına dönüş "
+                "kullanıcı tarafından iptal edildi."
             )
             return
 
-        # Restore sırasında canlı position okuması yapılmaz.
         self.position_timer.stop()
 
         try:
+            self.status_panel.set_restoring()
+
             self.configuration_panel.set_restoring()
             self.scan_button.setEnabled(False)
 
@@ -461,29 +591,37 @@ class MainWindow(QMainWindow):
 
             self.clear_encoder_information()
 
+            self.status_panel.set_connected(
+                self.controller.current_baud_rate
+                or old_baud_rate
+            )
+
             QMessageBox.information(
                 self,
                 "Restore Komutu Başarılı",
                 (
-                    "Encoder fabrika ayarlarına dönüş "
-                    "komutunu kabul etti.\n\n"
+                    "Encoder fabrika ayarlarına "
+                    "dönüş komutunu kabul etti.\n\n"
                     f"Restore öncesi Node ID: "
                     f"0x{old_node_id:02X}\n"
                     f"Restore öncesi Baud Rate: "
                     f"{old_baud_rate} kbit/s\n\n"
                     "Encoder'ın Node ID ve baud rate "
-                    "değerleri fabrika değerlerine dönmüş "
-                    "olabilir.\n\n"
+                    "değerleri fabrika değerlerine "
+                    "dönmüş olabilir.\n\n"
                     "Gerekirse encoder'ın enerjisini "
-                    "kapatıp yeniden açın. Daha sonra doğru "
-                    "baud rate değerini seçip ağı tekrar "
-                    "tarayın."
+                    "kapatıp yeniden açın. Daha sonra "
+                    "doğru baud rate değerini seçip "
+                    "ağı tekrar tarayın."
                 ),
             )
 
         except Exception as error:
+            self.status_panel.set_error()
+
             self.log(
-                "✗ Fabrika ayarlarına dönüş başarısız: "
+                "✗ Fabrika ayarlarına dönüş "
+                "başarısız: "
                 f"{error}"
             )
 
@@ -521,7 +659,9 @@ class MainWindow(QMainWindow):
                 value,
                 (
                     16
-                    if value.lower().startswith("0x")
+                    if value.lower().startswith(
+                        "0x"
+                    )
                     else 10
                 ),
             )
@@ -535,7 +675,8 @@ class MainWindow(QMainWindow):
 
         if not 1 <= node_id <= 127:
             raise ValueError(
-                "Node ID 1 ile 127 arasında olmalıdır."
+                "Node ID 1 ile 127 arasında "
+                "olmalıdır."
             )
 
         return node_id

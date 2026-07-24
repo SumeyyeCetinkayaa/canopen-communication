@@ -43,7 +43,7 @@ class ConfigurationPanel(QGroupBox):
         self.event_time_input.setReadOnly(True)
 
         # Butonlar ve CSS Stil Nesne İsimleri (objectName)
-        self.configure_button = QPushButton("Encoder'ı Yapılandır")
+        self.configure_button = QPushButton("Ayarları Uygula ve Kaydet")
         self.configure_button.setObjectName("primaryButton")
 
         self.restore_button = QPushButton("Fabrika Ayarlarını Geri Yükle")
