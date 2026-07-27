@@ -1,55 +1,159 @@
+"""
+Encoder durumlarını JSON dosyasında saklar.
+
+Birden fazla encoderın Node ID ve baud rate
+bilgilerini destekler.
+"""
+
 import json
 from pathlib import Path
 
 
-STATE_FILE = Path(__file__).parent / "encoder_state.json"
-
-DEFAULT_NODE_ID = 0x5B
-DEFAULT_BAUD_RATE = 250
+STATE_FILE = Path("encoder_state.json")
 
 
-def load_encoder_state():
+def load_encoder_states():
     """
-    Encoder'ın son bilinen Node ID ve baud rate değerlerini yükler.
-    Dosya yoksa varsayılan değerleri döndürür.
+    Kayıtlı bütün encoder durumlarını döndürür.
+
+    Dönüş biçimi:
+
+    {
+        "36": {
+            "baud_rate": 250
+        },
+        "91": {
+            "baud_rate": 250
+        }
+    }
     """
 
     if not STATE_FILE.exists():
-        return DEFAULT_NODE_ID, DEFAULT_BAUD_RATE
+        return {}
 
     try:
-        with open(STATE_FILE, "r", encoding="utf-8") as file:
-            state = json.load(file)
+        with STATE_FILE.open(
+            "r",
+            encoding="utf-8",
+        ) as file:
+            data = json.load(file)
 
-        node_id = int(state["node_id"])
-        baud_rate = int(state["baud_rate"])
+    except (
+        json.JSONDecodeError,
+        OSError,
+    ):
+        return {}
 
-        return node_id, baud_rate
+    # Yeni çoklu encoder biçimi
+    encoders = data.get("encoders")
 
-    except (OSError, ValueError, KeyError, json.JSONDecodeError):
-        print(
-            "Encoder durum dosyası okunamadı. "
-            "Varsayılan değerler kullanılacak."
+    if isinstance(encoders, dict):
+        return encoders
+
+    # Eski tek encoder biçimini yeni biçime dönüştür
+    node_id = data.get("node_id")
+    baud_rate = data.get("baud_rate")
+
+    if (
+        isinstance(node_id, int)
+        and isinstance(baud_rate, int)
+    ):
+        return {
+            str(node_id): {
+                "baud_rate": baud_rate
+            }
+        }
+
+    return {}
+
+
+def save_encoder_state(
+    node_id,
+    baud_rate,
+    old_node_id=None,
+):
+    """
+    Bir encoderın durumunu kaydeder veya günceller.
+
+    Node ID değiştirildiyse old_node_id verilerek
+    eski kayıt silinir.
+    """
+
+    encoders = load_encoder_states()
+
+    if (
+        old_node_id is not None
+        and old_node_id != node_id
+    ):
+        encoders.pop(
+            str(old_node_id),
+            None,
         )
 
-        return DEFAULT_NODE_ID, DEFAULT_BAUD_RATE
-
-
-def save_encoder_state(node_id, baud_rate):
-    """
-    Başarıyla uygulanan encoder ayarlarını dosyaya kaydeder.
-    """
-
-    state = {
-        "node_id": node_id,
-        "baud_rate": baud_rate
+    encoders[str(node_id)] = {
+        "baud_rate": int(baud_rate),
     }
 
-    with open(STATE_FILE, "w", encoding="utf-8") as file:
-        json.dump(state, file, indent=4)
+    data = {
+        "encoders": encoders
+    }
 
-    print(
-        f"Encoder durumu kaydedildi: "
-        f"Node ID 0x{node_id:02X}, "
-        f"Baud Rate {baud_rate} kbit/s"
+    with STATE_FILE.open(
+        "w",
+        encoding="utf-8",
+    ) as file:
+        json.dump(
+            data,
+            file,
+            indent=4,
+            ensure_ascii=False,
+        )
+
+
+def remove_encoder_state(node_id):
+    """
+    Belirtilen encoder kaydını dosyadan siler.
+    """
+
+    encoders = load_encoder_states()
+
+    encoders.pop(
+        str(node_id),
+        None,
     )
+
+    data = {
+        "encoders": encoders
+    }
+
+    with STATE_FILE.open(
+        "w",
+        encoding="utf-8",
+    ) as file:
+        json.dump(
+            data,
+            file,
+            indent=4,
+            ensure_ascii=False,
+        )
+
+
+def clear_encoder_states():
+    """
+    Bütün kayıtlı encoder durumlarını temizler.
+    """
+
+    data = {
+        "encoders": {}
+    }
+
+    with STATE_FILE.open(
+        "w",
+        encoding="utf-8",
+    ) as file:
+        json.dump(
+            data,
+            file,
+            indent=4,
+            ensure_ascii=False,
+        )
