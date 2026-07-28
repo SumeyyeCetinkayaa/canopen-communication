@@ -13,7 +13,6 @@ from canopen.encoder_reader import EncoderReader
 from canopen.node_scanner import NodeScanner
 from canopen.object_dictionary import ObjectDictionary
 from encoder_state import (
-    load_encoder_states,
     remove_encoder_state,
     save_encoder_state,
 )
@@ -148,6 +147,10 @@ class EncoderController:
         """
 
         if self.current_baud_rate == baud_rate:
+            self.log(
+                f"Mevcut bağlantı {baud_rate} kbit/s ile "
+                "kullanılıyor..."
+            )
             return
 
         self.log(
@@ -217,29 +220,48 @@ class EncoderController:
 
         return baud_order
 
-    def _get_saved_node_ids(self, saved_states):
+    def _get_saved_encoders_by_baud(self, saved_states):
         """
-        JSON içindeki geçerli Node ID değerlerini döndürür.
+        JSON kayıtlarını baud rate değerlerine göre gruplar.
+
+        Dönüş biçimi:
+
+        {
+            250: [36, 91],
+            125: [40]
+        }
         """
 
-        node_ids = []
+        grouped_encoders = {}
 
-        for node_id_text in saved_states:
+        for node_id_text, state in saved_states.items():
             try:
                 node_id = int(node_id_text)
+                baud_rate = int(state["baud_rate"])
             except (
                 TypeError,
                 ValueError,
+                KeyError,
             ):
                 continue
 
-            if (
-                1 <= node_id <= 127
-                and node_id not in node_ids
-            ):
-                node_ids.append(node_id)
+            if not 1 <= node_id <= 127:
+                continue
 
-        return sorted(node_ids)
+            if baud_rate not in BITRATE_VALUES:
+                continue
+
+            grouped_encoders.setdefault(
+                baud_rate,
+                []
+            ).append(node_id)
+
+        for baud_rate in grouped_encoders:
+            grouped_encoders[baud_rate] = sorted(
+                set(grouped_encoders[baud_rate])
+            )
+
+        return grouped_encoders
 
     def _scan_current_baud(
         self,
@@ -312,16 +334,19 @@ class EncoderController:
 
     def discover_encoders(
         self,
-        probe_timeout=0.02,
-        scan_timeout=0.008,
-        max_scan_seconds=18.0,
+        probe_timeout=None,
+        scan_timeout=0.05,
+        max_scan_seconds=10.0,
     ):
         """
-        Encoderları kontrollü süre içinde otomatik olarak bulur.
+        Yalnızca mevcut bağlantı baud rate'i üzerinde
+        Node ID 1-127 aralığını tarar.
 
-        Tarama hiçbir durumda max_scan_seconds süresinden uzun
-        devam etmez. Süre dolarsa bulunan cihazlar döndürülür;
-        hiçbir cihaz bulunmadıysa temiz şekilde sonlanır.
+        JSON kayıtları kullanılmaz.
+        Diğer baud rate değerlerine otomatik geçilmez.
+
+        probe_timeout parametresi, eski çağrılarla uyumluluk
+        sağlamak için kabul edilir ancak kullanılmaz.
         """
 
         if not self.is_connected:
@@ -329,119 +354,70 @@ class EncoderController:
                 "Önce CAN bağlantısını açmalısınız."
             )
 
+        if self.current_baud_rate is None:
+            raise RuntimeError(
+                "Geçerli baud rate bilgisi bulunamadı."
+            )
+
+        baud_rate = self.current_baud_rate
         deadline = (
             time.monotonic()
             + max_scan_seconds
         )
 
-        saved_states = load_encoder_states()
-        saved_node_ids = self._get_saved_node_ids(
-            saved_states
-        )
-        baud_order = self._get_discovery_baud_order(
-            saved_states
+        found_node_ids = []
+
+        self.log(
+            f"Encoder araması başlatılıyor: "
+            f"{baud_rate} kbit/s"
         )
 
         self.log(
-            f"Otomatik encoder araması başlatılıyor "
-            f"(en fazla {max_scan_seconds:.0f} saniye)..."
+            "Node ID 1-127 taranıyor..."
         )
 
-        # Önce kayıtlı Node ID'leri hızlıca kontrol et.
-        if saved_node_ids:
-            self.log(
-                f"Önce {len(saved_node_ids)} kayıtlı "
-                "Node ID kontrol edilecek."
-            )
-
-            for baud_rate in baud_order:
-                if time.monotonic() >= deadline:
-                    break
-
-                self._reconnect_for_scan(
-                    baud_rate
-                )
-
-                found_saved_nodes = []
-
-                for node_id in saved_node_ids:
-                    if time.monotonic() >= deadline:
-                        break
-
-                    if self._probe_node(
-                        node_id=node_id,
-                        timeout=probe_timeout,
-                    ):
-                        found_saved_nodes.append(
-                            node_id
-                        )
-
-                        self.log(
-                            f"✓ Kayıtlı encoder bulundu: "
-                            f"0x{node_id:02X} ({node_id}) | "
-                            f"{baud_rate} kbit/s"
-                        )
-
-                if found_saved_nodes:
-                    self.log(
-                        "Aynı baud rate üzerindeki diğer "
-                        "encoderlar taranıyor..."
-                    )
-
-                    node_ids = self._scan_current_baud(
-                        timeout=scan_timeout,
-                        deadline=deadline,
-                    )
-
-                    if not node_ids:
-                        node_ids = found_saved_nodes
-
-                    return self._accept_discovery_result(
-                        baud_rate=baud_rate,
-                        node_ids=node_ids,
-                    )
-
-        # Kayıtlar yanlışsa baud rate'lerde tam taramaya geç.
-        self.log(
-            "Kayıtlı cihaz bulunamadı. Kontrollü tam "
-            "tarama başlatılıyor..."
-        )
-
-        for baud_rate in baud_order:
+        for node_id in range(1, 128):
             if time.monotonic() >= deadline:
+                self.log(
+                    "⚠ Maksimum tarama süresine ulaşıldı."
+                )
                 break
 
-            self._reconnect_for_scan(
-                baud_rate
+            if self._probe_node(
+                node_id=node_id,
+                timeout=scan_timeout,
+            ):
+                found_node_ids.append(node_id)
+
+                self.log(
+                    f"✓ Encoder bulundu: "
+                    f"0x{node_id:02X} ({node_id})"
+                )
+
+        if found_node_ids:
+            self.current_baud_rate = baud_rate
+            self.detected_nodes = sorted(
+                set(found_node_ids)
             )
+
+            self.clear_selected_encoder()
 
             self.log(
-                f"{baud_rate} kbit/s üzerinde "
-                "Node ID 1-127 taranıyor..."
+                f"✓ Toplam {len(self.detected_nodes)} "
+                "encoder bulundu."
             )
 
-            node_ids = self._scan_current_baud(
-                timeout=scan_timeout,
-                deadline=deadline,
+            return (
+                baud_rate,
+                self.detected_nodes.copy(),
             )
-
-            if node_ids:
-                return self._accept_discovery_result(
-                    baud_rate=baud_rate,
-                    node_ids=node_ids,
-                )
 
         self.clear_encoder()
 
-        if time.monotonic() >= deadline:
-            self.log(
-                "✗ Otomatik tarama süre sınırında durduruldu."
-            )
-        else:
-            self.log(
-                "✗ Desteklenen baud rate değerlerinde "
-                "aktif encoder bulunamadı."
-            )
+        self.log(
+            f"✗ {baud_rate} kbit/s üzerinde "
+            "aktif encoder bulunamadı."
+        )
 
         return None, []
 
@@ -583,16 +559,21 @@ class EncoderController:
 
         self.log("✓ Ayarlar EEPROM'a kaydedildi.")
 
-        # Encoder yeni değerleri artık kalıcı hafızasına yazdı.
-        # Reset veya doğrulama sırasında hata oluşsa bile cihazı
-        # kaybetmemek için JSON kaydı hemen güncellenir.
+        # Yeni bilgiler EEPROM'a yazıldığı için, reset veya doğrulama
+        # sırasında hata oluşsa bile cihazın son bilinen bilgileri korunur.
+        save_encoder_state(
+            node_id=settings.new_node_id,
+            baud_rate=settings.baud_rate,
+            old_node_id=settings.current_node_id,
+        )
+
         self.log(
             "✓ Yeni Node ID ve baud rate bilgileri "
             "hemen JSON dosyasına kaydedildi."
         )
 
         time.sleep(1.0)
-    
+
         self.client.reset_communication(
             node_id=settings.current_node_id
         )
@@ -633,12 +614,6 @@ class EncoderController:
             )
 
         self.log("✓ SDO haberleşmesi doğrulandı.")
-
-        save_encoder_state(
-            node_id=settings.new_node_id,
-            baud_rate=settings.baud_rate,
-            old_node_id=settings.current_node_id,
-        )
 
         old_node_id = self.current_node_id
         self.current_node_id = settings.new_node_id
@@ -795,7 +770,7 @@ class EncoderController:
 
         self.log("✓ Restore işlemi tamamlandı.")
         self.log("⚠ Ağı yeniden tarayın.")
- 
+
         return old_node_id, old_baud_rate
 
     def shutdown(self):

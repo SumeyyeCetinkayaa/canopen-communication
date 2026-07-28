@@ -758,14 +758,29 @@ class MainWindow(QMainWindow):
                 node_id
             )
 
-            QMessageBox.information(
-                self,
-                "Yapılandırma Başarılı",
-                (
-                    "Seçili encoder başarıyla "
-                    "yapılandırıldı."
-                ),
+            success_message = QMessageBox(self)
+
+            success_message.setIcon(
+                QMessageBox.Icon.Information
             )
+            success_message.setWindowTitle(
+                "Yapılandırma Başarılı"
+            )
+            success_message.setText(
+                "Seçili encoder başarıyla yapılandırıldı."
+            )
+
+            success_message.setStandardButtons(
+                QMessageBox.StandardButton.Ok
+            )
+
+            success_message.button(
+                QMessageBox.StandardButton.Ok
+            ).setText("Tamam")
+
+            success_message.setMinimumWidth(380)
+
+            success_message.exec()
 
         except ValueError as error:
             self.status_panel.set_error()
