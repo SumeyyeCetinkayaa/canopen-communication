@@ -1,59 +1,48 @@
 """
 CAN haberleşmesi için ortak bir arayüz sağlar.
 
-Uygulamanın gerçek CAN donanımı (RealCan) veya simülasyon ortamı
-(FakeCan) kullandığını bilmesine gerek kalmadan aynı yöntemlerle
-haberleşmesini sağlar.
+Uygulamanın gerçek PEAK PCAN-USB donanımı üzerinden
+CAN haberleşmesi gerçekleştirmesini sağlar.
 """
 
-from config import USE_REAL_CAN, READ_TIMEOUT
-from bus.fake_can import FakeCan
+from config import READ_TIMEOUT
 from bus.real_can import RealCan
 
 
 class CanBus:
     def __init__(self):
-        if USE_REAL_CAN:
-            self.adapter = RealCan()
-        else:
-            self.adapter = FakeCan()
+        self.adapter = RealCan()
 
     def connect(self, bitrate=None):
         """
         CAN bağlantısını açar.
 
-        Gerçek CAN kullanıldığında bitrate verilebilir.
-        FakeCan kullanıldığında bitrate dikkate alınmaz.
+        bitrate verilmezse config.py içindeki varsayılan
+        bitrate değeri kullanılır.
         """
 
-        if USE_REAL_CAN:
-            self.adapter.connect(bitrate=bitrate)
-        else:
-            self.adapter.connect()
+        self.adapter.connect(bitrate=bitrate)
 
     def reconnect(self, bitrate):
         """
-        CAN bağlantısını verilen yeni bitrate ile yeniden açar.
+        CAN bağlantısını verilen bitrate ile yeniden açar.
         """
-
-        if not USE_REAL_CAN:
-            print(
-                "FakeCan kullanılırken bitrate değişikliği "
-                "uygulanmaz."
-            )
-            return
 
         self.adapter.reconnect(bitrate=bitrate)
 
     def send_message(self, message):
+        """
+        CAN mesajı gönderir.
+        """
+
         self.adapter.send(message)
 
     def read_message(self, timeout=None):
         """
         CAN hattından mesaj okur.
 
-        timeout verilmezse config.py içindeki READ_TIMEOUT kullanılır.
-        Tarama gibi hızlı işlemler kendi kısa timeout değerini verebilir.
+        timeout verilmezse config.py içindeki READ_TIMEOUT
+        değeri kullanılır.
         """
 
         effective_timeout = (
@@ -67,4 +56,8 @@ class CanBus:
         )
 
     def shutdown(self):
+        """
+        CAN bağlantısını kapatır.
+        """
+
         self.adapter.shutdown()

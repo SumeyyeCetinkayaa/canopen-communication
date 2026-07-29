@@ -9,20 +9,22 @@ bilgilerinden oluşur.
 
 Projedeki tüm CANopen mesajları bu sınıf kullanılarak taşınmaktadır.
 """
+
+
 class CanMessage:
     def __init__(self, arbitration_id, data):
-        self.arbitration_id = arbitration_id #mesaj ID'sini saklar
-        self.data = data #mesajın veri içeriğini saklar
-        self.dlc = len(data) #mesajın veri uzunluğunu saklar (DLC: Data Length Code)
+        if not 0 <= arbitration_id <= 0x7FF:
+            raise ValueError("Standart CAN ID 0x000-0x7FF arasında olmalıdır.")
 
-    def __str__(self):
-        data_text = " ".join(f"{byte:02X}" for byte in self.data)
+        if len(data) > 8:
+            raise ValueError("Klasik CAN mesajı en fazla 8 byte olabilir.")
 
-        return (
-            f"ID: 0x{self.arbitration_id:X} | "
-            f"DLC: {self.dlc} | "
-            f"DATA: {data_text}"
-        )
+        if any(not 0 <= byte <= 0xFF for byte in data):
+            raise ValueError("Her veri elemanı 0-255 arasında olmalıdır.")
+
+        self.arbitration_id = arbitration_id
+        self.data = list(data)
+        self.dlc = len(data)
 
 #ileride mesaj formatlama işlemlerini kolaylaştırmak için kullanılacak bir yardımcı fonksiyon.
 def format_can_message(msg):
