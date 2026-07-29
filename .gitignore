@@ -5,3 +5,7 @@ venv/
 .vscode/
 .idea/
 encoder_state.json
+build/
+dist/
+__pycache__/
+*.pyc

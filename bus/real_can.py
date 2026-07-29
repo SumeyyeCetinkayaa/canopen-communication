@@ -8,6 +8,8 @@ açılmasını destekler.
 """
 
 import can
+import can.interfaces.pcan
+
 
 from config import CHANNEL, BITRATE
 
